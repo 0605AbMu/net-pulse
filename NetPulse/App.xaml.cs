@@ -100,12 +100,14 @@ public partial class App : Application
         {
             AppLogger.LogError("[Dispatcher UNHANDLED EXCEPTION]", args.Exception);
             Trace.TraceError($"[Dispatcher UNHANDLED EXCEPTION]: {args.Exception}");
+            args.Handled = true;
         };
 
         TaskScheduler.UnobservedTaskException += (s, args) =>
         {
             AppLogger.LogError("[TaskScheduler UNOBSERVED EXCEPTION]", args.Exception);
             Trace.TraceError($"[TaskScheduler UNOBSERVED EXCEPTION]: {args.Exception}");
+            args.SetObserved();
         };
     }
 }

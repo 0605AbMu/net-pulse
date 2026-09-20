@@ -47,6 +47,7 @@ public static class AdminHelper
             {
                 FileName = exePath,
                 Arguments = additionalArgs ?? string.Empty,
+                WorkingDirectory = Environment.SystemDirectory,
                 UseShellExecute = true,
                 Verb = "runas"
             };
@@ -94,6 +95,7 @@ public static class AdminHelper
             {
                 FileName = appExe,
                 Arguments = args,
+                WorkingDirectory = Environment.SystemDirectory,
                 UseShellExecute = true,
                 Verb = "runas",
                 WindowStyle = ProcessWindowStyle.Hidden
@@ -120,16 +122,35 @@ public static class AdminHelper
         }
     }
 
+    private static string ResolveSystemExecutablePath(string fileName)
+    {
+        if (Path.IsPathRooted(fileName) && File.Exists(fileName))
+        {
+            return fileName;
+        }
+
+        var systemPath = Path.Combine(Environment.SystemDirectory, fileName);
+        if (File.Exists(systemPath))
+        {
+            return systemPath;
+        }
+
+        return fileName;
+    }
+
     public static async Task<ProcessExecutionResult> RunCommandAsync(string fileName, string arguments, bool requireAdmin = false)
     {
+        var resolvedFileName = ResolveSystemExecutablePath(fileName);
+
         if (requireAdmin && !IsAdministrator())
         {
             try
             {
                 var elevatedInfo = new ProcessStartInfo
                 {
-                    FileName = fileName,
+                    FileName = resolvedFileName,
                     Arguments = arguments,
+                    WorkingDirectory = Environment.SystemDirectory,
                     UseShellExecute = true,
                     Verb = "runas",
                     WindowStyle = ProcessWindowStyle.Hidden
@@ -156,8 +177,9 @@ public static class AdminHelper
         {
             var startInfo = new ProcessStartInfo
             {
-                FileName = fileName,
+                FileName = resolvedFileName,
                 Arguments = arguments,
+                WorkingDirectory = Environment.SystemDirectory,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,
@@ -174,6 +196,32 @@ public static class AdminHelper
 
             return new ProcessExecutionResult(process.ExitCode, stdout, stderr);
         }
+        catch (Win32Exception ex) when (ex.NativeErrorCode == 5) // Access is denied
+        {
+            // Fallback: If UseShellExecute=false failed with Access is denied, attempt elevated execution
+            try
+            {
+                var elevatedFallback = new ProcessStartInfo
+                {
+                    FileName = resolvedFileName,
+                    Arguments = arguments,
+                    WorkingDirectory = Environment.SystemDirectory,
+                    UseShellExecute = true,
+                    Verb = "runas",
+                    WindowStyle = ProcessWindowStyle.Hidden
+                };
+
+                using var elevatedProc = Process.Start(elevatedFallback);
+                if (elevatedProc != null)
+                {
+                    await elevatedProc.WaitForExitAsync();
+                    return new ProcessExecutionResult(elevatedProc.ExitCode, string.Empty, string.Empty);
+                }
+            }
+            catch { }
+
+            return new ProcessExecutionResult(-1, string.Empty, ex.Message);
+        }
         catch (Exception ex)
         {
             return new ProcessExecutionResult(-1, string.Empty, ex.Message);
@@ -184,10 +232,12 @@ public static class AdminHelper
     {
         try
         {
+            var psPath = Path.Combine(Environment.SystemDirectory, "WindowsPowerShell", "v1.0", "powershell.exe");
             var startInfo = new ProcessStartInfo
             {
-                FileName = "powershell.exe",
+                FileName = File.Exists(psPath) ? psPath : "powershell.exe",
                 Arguments = "-NoProfile -ExecutionPolicy Bypass -Command -",
+                WorkingDirectory = Environment.SystemDirectory,
                 RedirectStandardInput = true,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,

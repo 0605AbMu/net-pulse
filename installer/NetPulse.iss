@@ -6,7 +6,7 @@
 #endif
 
 #ifndef MyAppVersion
-#define MyAppVersion "1.2.0"
+#define MyAppVersion "1.2.1"
 #endif
 
 #ifndef MyAppPublisher
@@ -50,6 +50,9 @@ AppUpdatesURL={#MyAppURL}/releases
 DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
+
+; Install 64-bit binaries to standard Program Files on 64-bit Windows
+ArchitecturesInstallIn64BitMode=x64compatible
 
 ; Update settings: Use previous installation path automatically
 UsePreviousAppDir=yes
@@ -101,7 +104,7 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: de
 
 [Run]
 ; Launch application option after install/update (skipped during silent installs)
-Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent runascurrentuser
 
 [Code]
 // Helper function to check if this is an upgrade/update over an existing installation

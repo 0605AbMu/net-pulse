@@ -289,11 +289,11 @@ public static class NetworkHelper
         int successfulPings = 0;
         int failed = 0;
 
-        using var ping = new Ping();
         for (int i = 0; i < count; i++)
         {
             try
             {
+                using var ping = new Ping();
                 var reply = await ping.SendPingAsync(host, timeoutMs);
                 if (reply.Status == IPStatus.Success)
                 {
@@ -457,16 +457,25 @@ public static class NetworkHelper
                 }
             }
 
-            // Fallback: If ICMP is blocked, measure TCP connection latency to Cloudflare
+            // Fallback: If ICMP is blocked, measure TCP connection latency to Cloudflare safely
             if (initialPing <= 0)
             {
-                var swPing = Stopwatch.StartNew();
-                using var tcpClient = new TcpClient();
-                var connectTask = tcpClient.ConnectAsync("1.1.1.1", 80);
-                if (await Task.WhenAny(connectTask, Task.Delay(800, cancellationToken)) == connectTask && tcpClient.Connected)
+                try
                 {
-                    swPing.Stop();
-                    initialPing = Math.Max(1, (int)swPing.ElapsedMilliseconds);
+                    var swPing = Stopwatch.StartNew();
+                    using var tcpClient = new TcpClient();
+                    using var pingCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                    pingCts.CancelAfter(800);
+                    await tcpClient.ConnectAsync("1.1.1.1", 80, pingCts.Token);
+                    if (tcpClient.Connected)
+                    {
+                        swPing.Stop();
+                        initialPing = Math.Max(1, (int)swPing.ElapsedMilliseconds);
+                    }
+                }
+                catch
+                {
+                    // Ignore timeouts or unreachability safely without orphaned tasks
                 }
             }
         }
@@ -507,7 +516,8 @@ public static class NetworkHelper
                     Interlocked.Add(ref totalBytesRead, read);
                 }
             }
-            catch { }
+            catch (OperationCanceledException) { }
+            catch (Exception) { }
         }).ToList();
 
         // 2. Sliding window measurement with Exponential Moving Average (EMA)

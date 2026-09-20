@@ -33,6 +33,39 @@ public class WinsockCheck : INetworkCheck
 
         var pingResult = await NetworkHelper.PingAsync(info.DefaultGateway.ToString(), count: 6, timeoutMs: 1000);
 
+        if (pingResult.AvgLatencyMs < 0 || pingResult.PacketLossPercent >= 100)
+        {
+            // Router might be blocking ICMP ping. Check if external network is reachable.
+            var extPing = await NetworkHelper.PingAsync("1.1.1.1", count: 2, timeoutMs: 800);
+            if (extPing.AvgLatencyMs <= 0)
+            {
+                extPing = await NetworkHelper.PingAsync("8.8.8.8", count: 2, timeoutMs: 800);
+            }
+
+            if (extPing.AvgLatencyMs > 0)
+            {
+                // External internet works! Router firewall is simply blocking local ICMP ping requests
+                result.Status = DiagnosticStatus.Success;
+                result.DetailsKey = "Check_Winsock_NoPing_Details";
+                result.DetailsArgs = new object[] { info.DefaultGateway };
+                result.Details = LocalizationService.Get("Check_Winsock_NoPing_Details", info.DefaultGateway);
+                result.RecommendationKey = "Check_Winsock_NoPing_Rec";
+                result.Recommendation = LocalizationService.Get("Check_Winsock_NoPing_Rec");
+                result.CanAutoRepair = false;
+                return result;
+            }
+
+            // Both gateway and external internet failed
+            result.Status = DiagnosticStatus.Danger;
+            result.DetailsKey = "Check_Winsock_NoGateway_Details";
+            result.Details = LocalizationService.Get("Check_Winsock_NoGateway_Details");
+            result.RecommendationKey = "Check_Winsock_NoGateway_Rec";
+            result.Recommendation = LocalizationService.Get("Check_Winsock_NoGateway_Rec");
+            result.CanAutoRepair = true;
+            result.RepairActionId = RepairActionId.ResetStack;
+            return result;
+        }
+
         if (pingResult.PacketLossPercent > 0 || pingResult.AvgLatencyMs > 25)
         {
             result.Status = pingResult.PacketLossPercent > 20 ? DiagnosticStatus.Danger : DiagnosticStatus.Warning;
@@ -41,17 +74,6 @@ public class WinsockCheck : INetworkCheck
             result.Details = LocalizationService.Get("Check_Winsock_Unstable_Details", pingResult.AvgLatencyMs, pingResult.PacketLossPercent, info.DefaultGateway);
             result.RecommendationKey = "Check_Winsock_Unstable_Rec";
             result.Recommendation = LocalizationService.Get("Check_Winsock_Unstable_Rec");
-            result.CanAutoRepair = true;
-            result.RepairActionId = RepairActionId.ResetStack;
-        }
-        else if (pingResult.AvgLatencyMs < 0)
-        {
-            result.Status = DiagnosticStatus.Warning;
-            result.DetailsKey = "Check_Winsock_NoPing_Details";
-            result.DetailsArgs = new object[] { info.DefaultGateway };
-            result.Details = LocalizationService.Get("Check_Winsock_NoPing_Details", info.DefaultGateway);
-            result.RecommendationKey = "Check_Winsock_NoPing_Rec";
-            result.Recommendation = LocalizationService.Get("Check_Winsock_NoPing_Rec");
             result.CanAutoRepair = true;
             result.RepairActionId = RepairActionId.ResetStack;
         }

@@ -1,3 +1,5 @@
+using System.IO;
+using System.Management;
 using System.Text;
 using Microsoft.Win32;
 using NetPulse.Localization;
@@ -175,18 +177,78 @@ public static class RepairEngine
                 return RepairActionResult.Fail(LocalizationService.Get("Repair_DnsError", "Yaroqsiz IP manzil formati"));
             }
 
-            // Direct netsh command execution
-            var p1 = await AdminHelper.RunCommandAsync("netsh.exe", $"interface ipv4 set dns name=\"{adapterName}\" static {primaryDns} primary", requireAdmin: true);
-            var p2 = await AdminHelper.RunCommandAsync("netsh.exe", $"interface ipv4 add dns name=\"{adapterName}\" {secondaryDns} index=2", requireAdmin: true);
+            bool success = false;
+            string? lastError = null;
+
+            // Method 1: Modern PowerShell cmdlet Set-DnsClientServerAddress (handles Unicode/Cyrillic adapter names perfectly)
+            try
+            {
+                var safeAdapter = adapterName.Replace("'", "''");
+                var psCommand = $"Set-DnsClientServerAddress -InterfaceAlias '{safeAdapter}' -ServerAddresses @('{primaryDns}','{secondaryDns}') -ErrorAction Stop";
+                var psRes = AdminHelper.RunScriptInProcess(psCommand);
+                if (psRes.Success)
+                {
+                    success = true;
+                }
+                else if (!string.IsNullOrWhiteSpace(psRes.Error))
+                {
+                    lastError = psRes.Error;
+                }
+            }
+            catch (Exception ex)
+            {
+                lastError = ex.Message;
+            }
+
+            // Method 2: WMI / Win32_NetworkAdapterConfiguration (In-process C#)
+            if (!success)
+            {
+                try
+                {
+                    using var searcher = new ManagementObjectSearcher(
+                        "SELECT Index, Description, SettingID, IPEnabled FROM Win32_NetworkAdapterConfiguration WHERE IPEnabled = True");
+                    foreach (ManagementObject obj in searcher.Get())
+                    {
+                        using var inParams = obj.GetMethodParameters("SetDNSServerSearchOrder");
+                        inParams["DNSServerSearchOrder"] = new string[] { primaryDns, secondaryDns };
+                        using var outParams = obj.InvokeMethod("SetDNSServerSearchOrder", inParams, null);
+                        var retVal = Convert.ToUInt32(outParams["ReturnValue"]);
+                        if (retVal == 0 || retVal == 1) // 0 = Success, 1 = Success (Reboot required)
+                        {
+                            success = true;
+                            break;
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    lastError ??= ex.Message;
+                }
+            }
+
+            // Method 3: Fallback to netsh.exe
+            if (!success)
+            {
+                var p1 = await AdminHelper.RunCommandAsync("netsh.exe", $"interface ipv4 set dns name=\"{adapterName}\" static {primaryDns} primary", requireAdmin: true);
+                var p2 = await AdminHelper.RunCommandAsync("netsh.exe", $"interface ipv4 add dns name=\"{adapterName}\" {secondaryDns} index=2", requireAdmin: true);
+                if (p1.Success)
+                {
+                    success = true;
+                }
+                else
+                {
+                    lastError = !string.IsNullOrWhiteSpace(p1.Error) ? p1.Error : p1.Output;
+                }
+            }
+
             await AdminHelper.RunCommandAsync("ipconfig.exe", "/flushdns");
 
-            if (p1.Success)
+            if (success)
             {
                 return RepairActionResult.Ok(LocalizationService.Get("Repair_DnsSuccess", adapterName, primaryDns, secondaryDns));
             }
 
-            var errorMsg = !string.IsNullOrWhiteSpace(p1.Error) ? p1.Error : p1.Output;
-            return RepairActionResult.Fail(LocalizationService.Get("Repair_DnsError", errorMsg));
+            return RepairActionResult.Fail(LocalizationService.Get("Repair_DnsError", lastError ?? "Noma'lum xatolik"));
         }
         catch (Exception ex)
         {
@@ -199,7 +261,8 @@ public static class RepairEngine
         try
         {
             var p1 = await AdminHelper.RunCommandAsync("netsh.exe", "winsock reset", requireAdmin: true);
-            var p2 = await AdminHelper.RunCommandAsync("netsh.exe", "int ip reset", requireAdmin: true);
+            var resetLog = Path.Combine(Path.GetTempPath(), "netpulse_resetlog.txt");
+            var p2 = await AdminHelper.RunCommandAsync("netsh.exe", $"int ip reset \"{resetLog}\"", requireAdmin: true);
             await AdminHelper.RunCommandAsync("ipconfig.exe", "/flushdns");
 
             if (p1.Success || p2.Success)
