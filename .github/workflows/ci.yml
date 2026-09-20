@@ -40,10 +40,10 @@ jobs:
         run: dotnet build NetPulse/NetPulse.csproj -c Release --no-restore
 
   # 2. Versiyalangan Release va Inno Setup paketi:
-  # Faqat versiya tegi qo'yilganda (v1.0.0 kabi) yoki qo'lda versiya bilan ishga tushirilganda ishlaydi
+  # Har bir versiya tegi (v1.0.0), manual release yoki main branchga yangilanishda ishlaydi
   release:
-    name: Package & Release Version
-    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    name: Package & Release (.exe)
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
     needs: validate
     runs-on: windows-latest
 
@@ -173,14 +173,12 @@ $hashGeneric  NetPulse-Setup.exe
             installer/output/version.json
           if-no-files-found: error
 
-      - name: Publish GitHub Release
+      - name: Publish GitHub Release (.exe Installer)
         uses: softprops/action-gh-release@v2
         with:
           files: |
             installer/output/NetPulse-Setup-v${{ env.VERSION }}.exe
             installer/output/NetPulse-Setup.exe
-            installer/output/checksums.txt
-            installer/output/version.json
           tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('v{0}', env.VERSION) }}
           name: NetPulse v${{ env.VERSION }}
           draft: false
