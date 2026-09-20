@@ -12,6 +12,8 @@ public partial class MainViewModel : ObservableObject
 {
     private readonly DiagnosticEngine _diagnosticEngine;
 
+    public string AppVersion => AppVersionHelper.DisplayVersion;
+
     [ObservableProperty]
     private NetworkInfo _currentNetwork = new();
 

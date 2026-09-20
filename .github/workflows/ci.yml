@@ -80,8 +80,15 @@ jobs:
             exit 1
           }
 
-          Write-Host "Aniqlangan Versiya: $ver" -ForegroundColor Green
+          # AssemblyVersion va FileVersion uchun faqat raqamli qismini olish (masalan 1.0.1-rc1 -> 1.0.1)
+          $numVer = ($ver -replace '^([0-9]+(?:\.[0-9]+)*).*$', '$1')
+          if ($numVer -notmatch '^[0-9]+(\.[0-9]+){1,3}$') {
+            $numVer = "1.0.0"
+          }
+
+          Write-Host "Aniqlangan Versiya: $ver (Raqamli: $numVer)" -ForegroundColor Green
           echo "VERSION=$ver" >> $env:GITHUB_ENV
+          echo "NUM_VERSION=$numVer" >> $env:GITHUB_ENV
           echo "version=$ver" >> $env:GITHUB_OUTPUT
 
       - name: Restore dependencies
@@ -101,8 +108,8 @@ jobs:
             -p:IncludeNativeLibrariesForSelfExtract=true `
             -p:EnableCompressionInSingleFile=true `
             -p:Version=${{ env.VERSION }} `
-            -p:AssemblyVersion=${{ env.VERSION }} `
-            -p:FileVersion=${{ env.VERSION }} `
+            -p:AssemblyVersion=${{ env.NUM_VERSION }} `
+            -p:FileVersion=${{ env.NUM_VERSION }} `
             -p:InformationalVersion=${{ env.VERSION }} `
             -o ./portable
 
@@ -120,8 +127,8 @@ jobs:
             --self-contained true `
             -p:PublishSingleFile=false `
             -p:Version=${{ env.VERSION }} `
-            -p:AssemblyVersion=${{ env.VERSION }} `
-            -p:FileVersion=${{ env.VERSION }} `
+            -p:AssemblyVersion=${{ env.NUM_VERSION }} `
+            -p:FileVersion=${{ env.NUM_VERSION }} `
             -p:InformationalVersion=${{ env.VERSION }} `
             -o ./publish
 

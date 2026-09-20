@@ -6,9 +6,9 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
-    <Version>1.1.0</Version>
-    <AssemblyVersion>1.1.0.0</AssemblyVersion>
-    <FileVersion>1.1.0.0</FileVersion>
+    <Version>1.1.1</Version>
+    <AssemblyVersion>1.1.1.0</AssemblyVersion>
+    <FileVersion>1.1.1.0</FileVersion>
     <AssemblyTitle>NetPulse</AssemblyTitle>
     <Product>NetPulse</Product>
     <Authors>NetPulse</Authors>
@@ -16,6 +16,7 @@
     <Description>NetPulse Network Diagnostic &amp; Optimization Tool</Description>
     <Copyright>Copyright © 2026 NetPulse</Copyright>
     <ApplicationIcon>Assets\app.ico</ApplicationIcon>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
   </PropertyGroup>
 
   <ItemGroup>

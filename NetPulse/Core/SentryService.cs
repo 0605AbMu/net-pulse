@@ -19,7 +19,7 @@ public static class SentryService
         try
         {
             var deviceId = DeviceId;
-            var appVersion = Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "1.0.0";
+            var appVersion = AppVersionHelper.Version;
 
             _sentryClient = SentrySdk.Init(options =>
             {

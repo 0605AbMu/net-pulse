@@ -10,14 +10,36 @@
 param (
     [string]$Configuration = "Release",
     [string]$Runtime = "win-x64",
-    [string]$OutputDir = "$PSScriptRoot\dist"
+    [string]$OutputDir = "",
+    [string]$Version = ""
 )
 
 $ErrorActionPreference = "Stop"
 
+if ([string]::IsNullOrWhiteSpace($OutputDir)) {
+    $OutputDir = Join-Path $PSScriptRoot "dist"
+}
+
 Write-Host "=========================================" -ForegroundColor Cyan
 Write-Host "  NetPulse Release Build & Packaging" -ForegroundColor Cyan
 Write-Host "=========================================" -ForegroundColor Cyan
+
+# 0. Determine Application Version
+$projectPath = "$PSScriptRoot\NetPulse\NetPulse.csproj"
+[xml]$proj = Get-Content $projectPath
+$appVer = $Version
+if ([string]::IsNullOrWhiteSpace($appVer)) {
+    $appVer = $proj.Project.PropertyGroup.Version
+}
+if ([string]::IsNullOrWhiteSpace($appVer)) { $appVer = "1.1.0" }
+$appVer = $appVer.Trim().TrimStart('v')
+
+$numVer = ($appVer -replace '^([0-9]+(?:\.[0-9]+)*).*$', '$1')
+if ($numVer -notmatch '^[0-9]+(\.[0-9]+){1,3}$') {
+    $numVer = "1.0.0"
+}
+
+Write-Host "Application Version: $appVer (Assembly: $numVer)" -ForegroundColor Green
 
 # 1. Ensure output directory exists and is clean
 if (Test-Path $OutputDir) {
@@ -33,7 +55,6 @@ Stop-Process -Name "NetPulse" -Force -ErrorAction SilentlyContinue
 
 # 3. Publish self-contained single-file executable
 Write-Host "[2/4] Publishing self-contained single-file executable ($Runtime)..." -ForegroundColor Yellow
-$projectPath = "$PSScriptRoot\NetPulse\NetPulse.csproj"
 
 $publishArgs = @(
     "publish",
@@ -43,7 +64,11 @@ $publishArgs = @(
     "--self-contained", "true",
     "-p:PublishSingleFile=true",
     "-p:IncludeNativeLibrariesForSelfExtract=true",
-    "-p:EnableCompressionInSingleFile=true"
+    "-p:EnableCompressionInSingleFile=true",
+    "-p:Version=$appVer",
+    "-p:AssemblyVersion=$numVer",
+    "-p:FileVersion=$numVer",
+    "-p:InformationalVersion=$appVer"
 )
 
 & dotnet @publishArgs
@@ -61,10 +86,6 @@ if (-not (Test-Path $publishedExe)) {
     Write-Error "Published executable not found at: $publishedExe"
     exit 1
 }
-
-[xml]$proj = Get-Content $projectPath
-$appVer = $proj.Project.PropertyGroup.Version
-if ([string]::IsNullOrWhiteSpace($appVer)) { $appVer = "1.1.0" }
 
 $destExe = "$OutputDir\NetPulse-v$appVer-$Runtime.exe"
 Copy-Item -Path $publishedExe -Destination $destExe -Force
