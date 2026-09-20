@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using NetPulse.Core;
@@ -259,6 +260,11 @@ public partial class MainViewModel : ObservableObject
         try
         {
             CurrentNetwork = await NetworkHelper.GetActiveNetworkInfoAsync();
+            SentryService.SetNetworkContext(CurrentNetwork);
+            if (CurrentNetwork.ConnectionType == NetworkConnectionType.WiFi && CurrentNetwork.SignalPercentage > 0)
+            {
+                SentryService.TrackWiFiSignal(CurrentNetwork.SignalPercentage, CurrentNetwork.BandDisplay);
+            }
             UpdateDnsStatus();
             AppLogger.Log($"[NetPulse] Network state updated: {CurrentNetwork.AdapterName} ({CurrentNetwork.ConnectionTypeDisplay})");
         }
@@ -332,6 +338,7 @@ public partial class MainViewModel : ObservableObject
         {
             // 1. Refresh network adapter info first
             CurrentNetwork = await NetworkHelper.GetActiveNetworkInfoAsync();
+            SentryService.SetNetworkContext(CurrentNetwork);
 
             // Reset diagnostic items status
             foreach (var item in DiagnosticItems)
@@ -366,14 +373,17 @@ public partial class MainViewModel : ObservableObject
                 AppLogger.Log($"[NetPulse] Running check {stepIndex}/{total}: {check.Id} ({check.Title})...");
                 SentryService.TrackFeatureUsage("diagnostic_check", new() { ["check_id"] = check.Id });
 
+                var checkSpan = transaction.StartChild($"check.{check.Id}", check.Title);
                 DiagnosticResult res;
                 try
                 {
                     res = await check.RunCheckAsync(CurrentNetwork);
+                    checkSpan.Finish(res.Status == DiagnosticStatus.Danger ? SpanStatus.InternalError : SpanStatus.Ok);
                     AppLogger.Log($"[NetPulse] Check {check.Id} result: {res.Status} | {res.Details}");
                 }
                 catch (Exception checkEx)
                 {
+                    checkSpan.Finish(SpanStatus.InternalError);
                     transaction.Status = SpanStatus.InternalError;
                     transaction.SetTag("error", $"check_error_{check.Id}");
                     AppLogger.LogError($"[NetPulse Check Error - {check.Id}]", checkEx);
@@ -390,6 +400,12 @@ public partial class MainViewModel : ObservableObject
                     };
                 }
 
+                // Agar tekshiruvda muammo (Warning/Danger) topilsa, Sentry ga metrika yuboramiz
+                if (res.Status == DiagnosticStatus.Warning || res.Status == DiagnosticStatus.Danger)
+                {
+                    SentryService.TrackDiagnosticIssue(check.Id.ToString(), res.Status, res.Title);
+                }
+
                 results.Add(res);
 
                 if (itemVm != null)
@@ -402,6 +418,9 @@ public partial class MainViewModel : ObservableObject
             }
 
             HealthScore = DiagnosticEngine.CalculateHealthScore(results);
+            int issuesCount = results.Count(r => r.Status == DiagnosticStatus.Warning || r.Status == DiagnosticStatus.Danger);
+            SentryService.TrackHealthScore(HealthScore, results.Count, issuesCount);
+
             UpdateHealthStatusText();
             UpdateCounts();
             ApplyFilter();
@@ -450,7 +469,11 @@ public partial class MainViewModel : ObservableObject
             ["action_id"] = item.RepairActionId.Value.ToString()
         });
 
+        var sw = Stopwatch.StartNew();
         var result = await RepairEngine.ExecuteActionAsync(item.RepairActionId.Value, CurrentNetwork);
+        sw.Stop();
+        SentryService.TrackRepairResult(item.RepairActionId.Value, result.Success, sw.ElapsedMilliseconds, result.Message);
+
         if (result.Success)
         {
             var check = _diagnosticEngine.GetRegisteredChecks().FirstOrDefault(c => c.Id == item.CheckId);
@@ -494,7 +517,11 @@ public partial class MainViewModel : ObservableObject
 
         try
         {
+            var sw = Stopwatch.StartNew();
             var res = await RepairEngine.OptimizeAllAsync(CurrentNetwork);
+            sw.Stop();
+            SentryService.TrackRepairResult(RepairActionId.OptimizeAll, res.Success, sw.ElapsedMilliseconds, res.Message);
+
             AppendRepairLog(res.Message);
 
             if (!res.Success)
@@ -533,7 +560,11 @@ public partial class MainViewModel : ObservableObject
 
         try
         {
+            var sw = Stopwatch.StartNew();
             var res = await RepairEngine.ExecuteActionAsync(action.Id, CurrentNetwork);
+            sw.Stop();
+            SentryService.TrackRepairResult(action.Id, res.Success, sw.ElapsedMilliseconds, res.Message);
+
             if (res.Success)
             {
                 transaction.Finish(SpanStatus.Ok);
@@ -609,6 +640,14 @@ public partial class MainViewModel : ObservableObject
             ProgressPercentage = 100;
             UpdateSpeedQuality(finalSpeed);
             IsTestCompleted = true; // Show status pill and measurements now!
+
+            // Sentry ga tezlik, ping va Wi-Fi metrikalarini yuborish
+            SentryService.TrackSpeedTestResult(finalSpeed, PingLatencyMs, PeakSpeedMbps);
+            if (CurrentNetwork.ConnectionType == NetworkConnectionType.WiFi && CurrentNetwork.SignalPercentage > 0)
+            {
+                SentryService.TrackWiFiSignal(CurrentNetwork.SignalPercentage, CurrentNetwork.BandDisplay);
+            }
+
             transaction.Finish(SpanStatus.Ok);
         }
         catch (Exception ex)
