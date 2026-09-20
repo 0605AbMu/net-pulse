@@ -66,6 +66,26 @@ Natijada `dist/` papkasida mustaqil, siqilgan va barcha kerakli kutubxonalarga e
 
 ---
 
+## 🚀 CI/CD va Reliz Chiqarish Qoidalari (GitHub Actions)
+
+Loyiha GitHub Actions orqali avtomatlashtirilgan:
+
+1. **`main` branchga push yoki merge qilinganda:**
+   - Faqatgina **Build & Validate** bosqichi ishlaydi. Kod .NET 10 da xatosiz yig'ilishi tekshiriladi.
+   - Hech qanday Release yoki Inno Setup paketi yaratilmaydi (keraksiz relizlar hosil bo'lmaydi).
+
+2. **Faqatgina versiya tegi (Tag) qo'yilganda (masalan `v1.0.1`):**
+   - **Release** bosqichi ishga tushadi.
+   - Ham Inno Setup o'rnatuvchisi (**`NetPulse-Setup-v...exe`**), ham dasturning o'zi (**`NetPulse-v...-Portable.exe`**) alohida `.exe` holatida yig'iladi va GitHub Releases sahifasida e'lon qilinadi.
+
+**Yangi reliz chiqarish buyrug'i:**
+```bash
+git tag v1.0.1
+git push origin v1.0.1
+```
+
+---
+
 ## 📂 Loyiha Strukturasi
 
 ```

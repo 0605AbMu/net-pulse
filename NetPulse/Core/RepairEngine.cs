@@ -32,7 +32,7 @@ public static class RepairEngine
         {
             Id = RepairActionId.PowerSaving,
             Category = RepairCategory.Recommended,
-            RequiresAdmin = true
+            RequiresAdmin = false
         },
         new RepairAction
         {
@@ -64,8 +64,11 @@ public static class RepairEngine
 
     public static async Task<RepairActionResult> ExecuteActionAsync(RepairActionId actionId, NetworkInfo? netInfo = null)
     {
+        var action = AvailableActions.FirstOrDefault(a => a.Id == actionId);
+        bool requiresAdmin = action?.RequiresAdmin ?? (actionId != RepairActionId.FlushDns && actionId != RepairActionId.PowerSaving);
+
         // If action requires administrator and current process is not admin, elevate cleanly via NetPulse internal action
-        if (actionId != RepairActionId.FlushDns && !AdminHelper.IsAdministrator())
+        if (requiresAdmin && !AdminHelper.IsAdministrator())
         {
             return await AdminHelper.RunElevatedActionAsync(actionId, netInfo?.AdapterName);
         }
@@ -135,13 +138,23 @@ public static class RepairEngine
         {
             const string wirelessSubgroup = "19cbb8fa-5279-450e-9fac-8a3d5fedd0c1";
             const string powerSavingSetting = "12bbebe6-58d6-4636-95bb-3217ef867c1a";
-            var p1 = await AdminHelper.RunCommandAsync("powercfg.exe", $"/setacvalueindex SCHEME_CURRENT {wirelessSubgroup} {powerSavingSetting} 0", requireAdmin: true);
-            var p2 = await AdminHelper.RunCommandAsync("powercfg.exe", $"/setdcvalueindex SCHEME_CURRENT {wirelessSubgroup} {powerSavingSetting} 0", requireAdmin: true);
-            var p3 = await AdminHelper.RunCommandAsync("powercfg.exe", "/SetActive SCHEME_CURRENT", requireAdmin: true);
+            var p1 = await AdminHelper.RunCommandAsync("powercfg.exe", $"/setacvalueindex SCHEME_CURRENT {wirelessSubgroup} {powerSavingSetting} 0");
+            var p2 = await AdminHelper.RunCommandAsync("powercfg.exe", $"/setdcvalueindex SCHEME_CURRENT {wirelessSubgroup} {powerSavingSetting} 0");
+            var p3 = await AdminHelper.RunCommandAsync("powercfg.exe", "/SetActive SCHEME_CURRENT");
 
             if (p1.Success && p2.Success && p3.Success)
             {
                 return RepairActionResult.Ok(LocalizationService.Get("Repair_PowerSuccess"));
+            }
+
+            // Fallback: If non-elevated attempt failed and we are not admin, try running elevated
+            if (!AdminHelper.IsAdministrator())
+            {
+                var elevatedResult = await AdminHelper.RunElevatedActionAsync(RepairActionId.PowerSaving);
+                if (elevatedResult.Success)
+                {
+                    return RepairActionResult.Ok(LocalizationService.Get("Repair_PowerSuccess"));
+                }
             }
 
             var errorMsg = !string.IsNullOrWhiteSpace(p1.Error) ? p1.Error : (!string.IsNullOrWhiteSpace(p2.Error) ? p2.Error : p3.Error);

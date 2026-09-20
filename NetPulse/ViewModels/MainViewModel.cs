@@ -69,7 +69,7 @@ public partial class MainViewModel : ObservableObject
     private double _gaugeAngle = -120.0;
 
     [ObservableProperty]
-    private string _speedQualityText = "Test o'tkazilmagan";
+    private string _speedQualityText = LocalizationService.Get("SpeedQualityNotTested");
 
     [ObservableProperty]
     private string _speedQualityColor = "#94A3B8";
@@ -81,7 +81,10 @@ public partial class MainViewModel : ObservableObject
     public bool ShowSpeedResults => IsTestCompleted && !IsTestingSpeed;
 
     [ObservableProperty]
-    private string _speedTestStatus = "Tezlikni o'lchashga tayyor";
+    private string _speedTestStatus = LocalizationService.Get("SpeedTest_StatusReady");
+
+    [ObservableProperty]
+    private string _speedTestServerName = LocalizationService.Get("SpeedTest_ServerName");
 
     // Repair log
     [ObservableProperty]
@@ -178,6 +181,11 @@ public partial class MainViewModel : ObservableObject
             }
 
             UpdateDnsStatus();
+            SpeedTestServerName = LocalizationService.Get("SpeedTest_ServerName");
+            if (!IsTestCompleted && !IsTestingSpeed)
+            {
+                SpeedTestStatus = LocalizationService.Get("SpeedTest_StatusReady");
+            }
             UpdateCounts();
             ApplyFilter();
         };
@@ -412,7 +420,17 @@ public partial class MainViewModel : ObservableObject
         var result = await RepairEngine.ExecuteActionAsync(item.RepairActionId.Value, CurrentNetwork);
         if (result.Success)
         {
-            item.Status = DiagnosticStatus.Success;
+            var check = _diagnosticEngine.GetRegisteredChecks().FirstOrDefault(c => c.Id == item.CheckId);
+            if (check != null && CurrentNetwork != null)
+            {
+                var recheck = await check.RunCheckAsync(CurrentNetwork);
+                item.UpdateFromResult(recheck);
+            }
+            else
+            {
+                item.Status = DiagnosticStatus.Success;
+            }
+
             item.IsRepaired = true;
             item.RepairMessage = LocalizationService.Get("RepairedSuccess");
             AppendRepairLog($"✅ [{item.Title}]: {result.Message}");
@@ -512,7 +530,7 @@ public partial class MainViewModel : ObservableObject
 
         try
         {
-            var finalSpeed = await NetworkHelper.TestDownloadSpeedMbpsAsync(detailedProgress: detailedProgress);
+            var finalSpeed = await NetworkHelper.TestDownloadSpeedMbpsAsync(detailedProgress: detailedProgress, defaultGateway: CurrentNetwork.DefaultGateway);
             CurrentSpeedMbps = finalSpeed;
             GaugeAngle = CalculateGaugeAngle(finalSpeed);
             ProgressPercentage = 100;

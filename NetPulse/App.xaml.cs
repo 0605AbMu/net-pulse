@@ -22,9 +22,8 @@ public partial class App : Application
                 {
                     string? adapter = (i + 2 < e.Args.Length) ? e.Args[i + 2] : null;
                     var netInfo = !string.IsNullOrEmpty(adapter) ? new Models.NetworkInfo { AdapterName = adapter } : null;
-                    var task = RepairEngine.ExecuteActionInternalAsync(actionId, netInfo);
-                    var result = task.GetAwaiter().GetResult();
-                    Shutdown(result.Success ? 0 : 1);
+                    var result = Task.Run(async () => await RepairEngine.ExecuteActionInternalAsync(actionId, netInfo)).GetAwaiter().GetResult();
+                    Environment.Exit(result.Success ? 0 : 1);
                     return;
                 }
             }
