@@ -303,6 +303,24 @@ public static class RussianTranslation
         ["Repair_FlushDns_Impact"] = "Помогает немедленно, если не открываются определенные веб-сайты.",
 
         ["RepairMessageRepairing"] = "Исправляется...",
-        ["ErrorPrefix"] = "Ошибка"
+        ["ErrorPrefix"] = "Ошибка",
+
+        // Repair Execution Messages
+        ["Repair_UnknownAction"] = "Неизвестное действие.",
+        ["Repair_TcpSuccess"] = "TCP Window Auto-Tuning успешно возвращен в режим 'normal'! Пропускная способность сети полностью разблокирована.",
+        ["Repair_TcpError"] = "Ошибка: {0}. Повторите попытку с правами Администратора.",
+        ["Repair_ThrottleSuccess"] = "Network Throttling успешно отключен (0xFFFFFFFF). Сетевые пакеты передаются без искусственных задержек.",
+        ["Repair_ThrottleError"] = "Реестр не изменен: {0}. Требуются права Администратора.",
+        ["Repair_PowerSuccess"] = "Режим энергосбережения Wi-Fi переведен в 'Максимальная производительность'!",
+        ["Repair_PowerError"] = "Не удалось изменить параметры питания: {0}.",
+        ["Repair_DnsSuccess"] = "DNS-серверы для {0} успешно изменены на {1}, {2} и кэш DNS очищен.",
+        ["Repair_DnsError"] = "DNS не изменен: {0}. Требуются права Администратора.",
+        ["Repair_ResetStackSuccess"] = "Стек Winsock и TCP/IP успешно сброшен. Для применения изменений рекомендуется перезагрузить компьютер.",
+        ["Repair_ResetStackError"] = "Сброс стека не выполнен: {0}.",
+        ["Repair_FlushDnsSuccess"] = "Кэш DNS успешно очищен.",
+        ["Repair_FlushDnsError"] = "Произошла ошибка при очистке кэша DNS.",
+        ["Repair_AdminRequired"] = "Требуются права Администратора.",
+        ["Repair_OptimizeAllSuccess"] = "Все ключевые параметры сети успешно оптимизированы!",
+        ["Repair_OptimizeAllPartial"] = "Оптимизация завершена (для некоторых параметров потребовались права доступа)."
     };
 }

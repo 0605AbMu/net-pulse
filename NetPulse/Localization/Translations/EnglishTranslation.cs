@@ -303,6 +303,24 @@ public static class EnglishTranslation
         ["Repair_FlushDns_Impact"] = "Helps immediately when websites fail to resolve.",
 
         ["RepairMessageRepairing"] = "Repairing...",
-        ["ErrorPrefix"] = "Error"
+        ["ErrorPrefix"] = "Error",
+
+        // Repair Execution Messages
+        ["Repair_UnknownAction"] = "Unknown action.",
+        ["Repair_TcpSuccess"] = "TCP Window Auto-Tuning restored to 'normal'! Full network throughput unlocked.",
+        ["Repair_TcpError"] = "Error: {0}. Please retry with Administrator privileges.",
+        ["Repair_ThrottleSuccess"] = "Network Throttling successfully disabled (0xFFFFFFFF). Network packets can flow unrestricted.",
+        ["Repair_ThrottleError"] = "Registry was not modified: {0}. Administrator privileges required.",
+        ["Repair_PowerSuccess"] = "Wi-Fi power saving mode set to 'Maximum Performance'!",
+        ["Repair_PowerError"] = "Failed to update power management: {0}.",
+        ["Repair_DnsSuccess"] = "DNS servers for {0} updated to {1}, {2} and DNS cache flushed.",
+        ["Repair_DnsError"] = "DNS was not updated: {0}. Administrator privileges required.",
+        ["Repair_ResetStackSuccess"] = "Winsock and TCP/IP stack successfully reset. A system restart is recommended for changes to take effect.",
+        ["Repair_ResetStackError"] = "Network stack reset failed: {0}.",
+        ["Repair_FlushDnsSuccess"] = "DNS cache flushed successfully.",
+        ["Repair_FlushDnsError"] = "Failed to flush DNS cache.",
+        ["Repair_AdminRequired"] = "Administrator privileges required.",
+        ["Repair_OptimizeAllSuccess"] = "All primary network parameters were successfully optimized!",
+        ["Repair_OptimizeAllPartial"] = "Optimization finished (some settings required elevated permissions)."
     };
 }

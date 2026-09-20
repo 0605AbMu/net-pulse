@@ -303,6 +303,24 @@ public static class UzbekTranslation
         ["Repair_FlushDns_Impact"] = "Saytlar ochilmay qolganda tezkor yordam beradi.",
 
         ["RepairMessageRepairing"] = "Tuzatilmoqda...",
-        ["ErrorPrefix"] = "Xatolik"
+        ["ErrorPrefix"] = "Xatolik",
+
+        // Repair Execution Messages
+        ["Repair_UnknownAction"] = "Noma'lum amal.",
+        ["Repair_TcpSuccess"] = "TCP Window Auto-Tuning 'normal' holatga sozlandi! Tarmoq o'tkazuvchanligi to'liq ochildi.",
+        ["Repair_TcpError"] = "Xatolik: {0}. Administrator huquqi bilan qayta urinib ko'ring.",
+        ["Repair_ThrottleSuccess"] = "Network Throttling muvaffaqiyatli o'chirildi (0xFFFFFFFF). Tarmoq paketlari to'siqsiz harakatlanadi.",
+        ["Repair_ThrottleError"] = "Registry o'zgartirilmadi: {0}. Administrator huquqi zarur.",
+        ["Repair_PowerSuccess"] = "Wi-Fi quvvat tejash rejimi 'Maksimal Unumdorlik' (Maximum Performance) ga o'tkazildi!",
+        ["Repair_PowerError"] = "Quvvat rejimini o'zgartirib bo'lmadi: {0}.",
+        ["Repair_DnsSuccess"] = "{0} uchun DNS serverlar {1}, {2} ga o'zgartirildi va DNS keshi tozalandi.",
+        ["Repair_DnsError"] = "DNS o'zgartirilmadi: {0}. Administrator huquqi talab qilinadi.",
+        ["Repair_ResetStackSuccess"] = "Winsock va TCP/IP stack to'liq qayta sozlandi. O'zgarishlar kuchga kirishi uchun kompyuterni qayta ishga tushirish (Restart) tavsiya etiladi.",
+        ["Repair_ResetStackError"] = "Stack qayta sozlanmadi: {0}.",
+        ["Repair_FlushDnsSuccess"] = "DNS keshi muvaffaqiyatli tozalandi.",
+        ["Repair_FlushDnsError"] = "DNS keshini tozalashda xatolik yuz berdi.",
+        ["Repair_AdminRequired"] = "Administrator huquqi zarur.",
+        ["Repair_OptimizeAllSuccess"] = "Barcha asosiy parametrlar muvaffaqiyatli optimallashtirildi!",
+        ["Repair_OptimizeAllPartial"] = "Optimizatsiya yakunlandi (ba'zi parametrlar uchun ruxsat kerak)."
     };
 }
