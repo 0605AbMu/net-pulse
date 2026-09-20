@@ -204,28 +204,77 @@ public static class NetworkHelper
         try
         {
             using var searcher = new ManagementObjectSearcher(
-                "SELECT DeviceName, DriverVersion, DriverDate FROM Win32_PnPSignedDriver WHERE DeviceName LIKE '%Wi-Fi%' OR DeviceName LIKE '%Wireless%' OR DeviceName LIKE '%802.11%' OR DeviceName LIKE '%Network%'");
+                "SELECT DeviceName, DriverVersion, DriverDate FROM Win32_PnPSignedDriver WHERE DeviceName LIKE '%Wi-Fi%' OR DeviceName LIKE '%Wireless%' OR DeviceName LIKE '%802.11%' OR DeviceName LIKE '%Ethernet%' OR DeviceName LIKE '%Network%' OR DeviceName LIKE '%Realtek%' OR DeviceName LIKE '%Intel%' OR DeviceName LIKE '%Broadcom%' OR DeviceName LIKE '%Qualcomm%' OR DeviceName LIKE '%MediaTek%'");
+
+            ManagementBaseObject? bestMatch = null;
+            int bestPriority = int.MaxValue;
+
+            static bool IsVirtualAdapter(string name)
+            {
+                var lower = name.ToLowerInvariant();
+                return lower.Contains("virtual") ||
+                       lower.Contains("direct") ||
+                       lower.Contains("bluetooth") ||
+                       lower.Contains("loopback") ||
+                       lower.Contains("tap-") ||
+                       lower.Contains("vpn") ||
+                       lower.Contains("hyper-v") ||
+                       lower.Contains("vethernet") ||
+                       lower.Contains("pacer") ||
+                       lower.Contains("pseudo");
+            }
 
             foreach (var obj in searcher.Get())
             {
                 var devName = obj["DeviceName"]?.ToString() ?? string.Empty;
-                if (!string.IsNullOrEmpty(info.InterfaceDescription) && devName.Contains(info.InterfaceDescription, StringComparison.OrdinalIgnoreCase) ||
-                    devName.Contains("Wi-Fi", StringComparison.OrdinalIgnoreCase) ||
-                    devName.Contains("Wireless", StringComparison.OrdinalIgnoreCase))
+                if (string.IsNullOrWhiteSpace(devName)) continue;
+
+                var isVirt = IsVirtualAdapter(devName);
+
+                // Priority 1: Exact or strong match with active InterfaceDescription (physical)
+                if (!string.IsNullOrEmpty(info.InterfaceDescription) && !isVirt &&
+                    (devName.Equals(info.InterfaceDescription, StringComparison.OrdinalIgnoreCase) ||
+                     devName.Contains(info.InterfaceDescription, StringComparison.OrdinalIgnoreCase) ||
+                     info.InterfaceDescription.Contains(devName, StringComparison.OrdinalIgnoreCase)))
                 {
-                    if (Version.TryParse(obj["DriverVersion"]?.ToString(), out var parsedVer))
-                    {
-                        info.DriverVersion = parsedVer;
-                    }
-                    var rawDate = obj["DriverDate"]?.ToString() ?? string.Empty;
-                    if (rawDate.Length >= 8 &&
-                        int.TryParse(rawDate.Substring(0, 4), out var year) &&
-                        int.TryParse(rawDate.Substring(4, 2), out var month) &&
-                        int.TryParse(rawDate.Substring(6, 2), out var day))
-                    {
-                        info.DriverDate = new DateOnly(year, month, day);
-                    }
+                    bestMatch = obj;
+                    bestPriority = 1;
                     break;
+                }
+
+                // Priority 2: Non-virtual adapter matching Wi-Fi/Wireless
+                if (!isVirt && (devName.Contains("Wi-Fi", StringComparison.OrdinalIgnoreCase) ||
+                               devName.Contains("Wireless", StringComparison.OrdinalIgnoreCase) ||
+                               devName.Contains("802.11", StringComparison.OrdinalIgnoreCase)))
+                {
+                    if (bestPriority > 2)
+                    {
+                        bestMatch = obj;
+                        bestPriority = 2;
+                    }
+                }
+
+                // Priority 3: Non-virtual general network card
+                if (!isVirt && bestPriority > 3)
+                {
+                    bestMatch = obj;
+                    bestPriority = 3;
+                }
+            }
+
+            if (bestMatch != null)
+            {
+                if (Version.TryParse(bestMatch["DriverVersion"]?.ToString(), out var parsedVer))
+                {
+                    info.DriverVersion = parsedVer;
+                }
+                var rawDate = bestMatch["DriverDate"]?.ToString() ?? string.Empty;
+                if (rawDate.Length >= 8 &&
+                    int.TryParse(rawDate.Substring(0, 4), out var year) &&
+                    int.TryParse(rawDate.Substring(4, 2), out var month) &&
+                    int.TryParse(rawDate.Substring(6, 2), out var day))
+                {
+                    info.DriverDate = new DateOnly(year, month, day);
                 }
             }
         }

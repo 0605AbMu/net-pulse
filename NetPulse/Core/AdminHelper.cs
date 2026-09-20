@@ -65,140 +65,58 @@ public static class AdminHelper
     }
 
     /// <summary>
-    /// Executes a PowerShell script with elevation if needed.
-    /// Uses NetPulse executable itself with Verb = 'runas' so the Windows UAC prompt shows 'NetPulse', not 'Windows PowerShell'.
+    /// Executes an internal NetPulse repair action with Administrator elevation.
+    /// Runs NetPulse itself with Verb = 'runas' and '--execute-action', completely eliminating external script files.
     /// </summary>
-    public static async Task<ProcessExecutionResult> RunElevatedScriptAsync(string script)
+    public static async Task<RepairActionResult> RunElevatedActionAsync(RepairActionId actionId, string? adapterName = null)
     {
         if (IsAdministrator())
         {
-            // Already admin: execute directly in-process without any UAC prompt
-            return await RunScriptInProcessAsync(script);
+            var netInfo = !string.IsNullOrEmpty(adapterName) ? new NetworkInfo { AdapterName = adapterName } : null;
+            return await RepairEngine.ExecuteActionInternalAsync(actionId, netInfo);
         }
-
-        // Not admin: create a temporary script file and run it elevated through NetPulse itself
-        var tempScriptPath = Path.Combine(Path.GetTempPath(), $"netpulse_{Guid.NewGuid():N}.ps1");
-        var tempLogPath = Path.Combine(Path.GetTempPath(), $"netpulse_{Guid.NewGuid():N}.log");
 
         try
         {
             var appExe = GetAppExecutablePath();
-            ProcessStartInfo startInfo;
-
-            if (!string.IsNullOrEmpty(appExe) && File.Exists(appExe))
+            if (string.IsNullOrEmpty(appExe) || !File.Exists(appExe))
             {
-                // Write pure script for NetPulse elevated runner
-                await File.WriteAllTextAsync(tempScriptPath, script, Encoding.UTF8);
-
-                // Launch NetPulse itself with Verb = "runas"
-                // The UAC prompt displays "NetPulse", NOT "Windows PowerShell"!
-                startInfo = new ProcessStartInfo
-                {
-                    FileName = appExe,
-                    Arguments = $"--run-script \"{tempScriptPath}\" \"{tempLogPath}\"",
-                    UseShellExecute = true,
-                    Verb = "runas",
-                    WindowStyle = ProcessWindowStyle.Hidden
-                };
-            }
-            else
-            {
-                // Fallback to powershell wrapper if app executable path cannot be resolved
-                var escapedLogPath = tempLogPath.Replace("'", "''");
-                var scriptWrapper = $@"
-[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-$OutputEncoding = [System.Text.Encoding]::UTF8
-$ErrorActionPreference = 'Continue'
-$logFile = '{escapedLogPath}'
-
-try {{
-    & {{
-{script}
-    }} *>&1 | Out-File -FilePath $logFile -Encoding utf8
-    if ($LASTEXITCODE -ne $null) {{ exit $LASTEXITCODE }} else {{ exit 0 }}
-}} catch {{
-    $_.ToString() | Out-File -FilePath $logFile -Append -Encoding utf8
-    exit 1
-}}
-";
-                await File.WriteAllTextAsync(tempScriptPath, scriptWrapper, Encoding.UTF8);
-
-                startInfo = new ProcessStartInfo
-                {
-                    FileName = "powershell.exe",
-                    Arguments = $"-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"{tempScriptPath}\"",
-                    UseShellExecute = true,
-                    Verb = "runas",
-                    WindowStyle = ProcessWindowStyle.Hidden
-                };
+                return RepairActionResult.Fail("Dastur ijrochi fayli topilmadi.");
             }
 
-            using var process = Process.Start(startInfo);
-            if (process == null)
+            var args = $"--execute-action {actionId}";
+            if (!string.IsNullOrEmpty(adapterName))
             {
-                return new ProcessExecutionResult(-1, string.Empty, "Jarayonni ishga tushirib bo'lmadi.");
+                args += $" \"{adapterName}\"";
             }
 
-            await process.WaitForExitAsync();
-
-            var output = File.Exists(tempLogPath) ? await File.ReadAllTextAsync(tempLogPath) : string.Empty;
-            return new ProcessExecutionResult(process.ExitCode, output, string.Empty);
-        }
-        catch (Win32Exception ex) when (ex.NativeErrorCode == 1223) // ERROR_CANCELLED
-        {
-            return new ProcessExecutionResult(-1, string.Empty, "Foydalanuvchi Administrator huquqini berishni rad etdi (UAC bekor qilindi).");
-        }
-        catch (Exception ex)
-        {
-            return new ProcessExecutionResult(-1, string.Empty, $"Xatolik yuz berdi: {ex.Message}");
-        }
-        finally
-        {
-            try
-            {
-                if (File.Exists(tempScriptPath)) File.Delete(tempScriptPath);
-                if (File.Exists(tempLogPath)) File.Delete(tempLogPath);
-            }
-            catch
-            {
-                // Ignore temp cleanup errors
-            }
-        }
-    }
-
-    public static async Task<ProcessExecutionResult> RunScriptInProcessAsync(string script)
-    {
-        try
-        {
             var startInfo = new ProcessStartInfo
             {
-                FileName = "powershell.exe",
-                Arguments = "-NoProfile -ExecutionPolicy Bypass -Command -",
-                RedirectStandardInput = true,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
+                FileName = appExe,
+                Arguments = args,
+                UseShellExecute = true,
+                Verb = "runas",
+                WindowStyle = ProcessWindowStyle.Hidden
             };
 
             using var process = Process.Start(startInfo);
             if (process == null)
             {
-                return new ProcessExecutionResult(-1, string.Empty, "PowerShell jarayonini boshlab bo'lmadi.");
+                return RepairActionResult.Fail("Administrator jarayonini ishga tushirib bo'lmadi.");
             }
 
-            await process.StandardInput.WriteAsync(script);
-            process.StandardInput.Close();
-
-            var outTask = process.StandardOutput.ReadToEndAsync();
-            var errTask = process.StandardError.ReadToEndAsync();
             await process.WaitForExitAsync();
-
-            return new ProcessExecutionResult(process.ExitCode, await outTask, await errTask);
+            return process.ExitCode == 0
+                ? RepairActionResult.Ok("Amal muvaffaqiyatli bajarildi.")
+                : RepairActionResult.Fail("Amalni bajarishda xatolik yuz berdi.");
+        }
+        catch (Win32Exception ex) when (ex.NativeErrorCode == 1223) // ERROR_CANCELLED
+        {
+            return RepairActionResult.Fail("Foydalanuvchi Administrator huquqini berishni rad etdi (UAC bekor qilindi).");
         }
         catch (Exception ex)
         {
-            return new ProcessExecutionResult(-1, string.Empty, ex.Message);
+            return RepairActionResult.Fail($"Xatolik yuz berdi: {ex.Message}");
         }
     }
 
@@ -206,8 +124,32 @@ try {{
     {
         if (requireAdmin && !IsAdministrator())
         {
-            var script = $"& '{fileName}' {arguments}";
-            return await RunElevatedScriptAsync(script);
+            try
+            {
+                var elevatedInfo = new ProcessStartInfo
+                {
+                    FileName = fileName,
+                    Arguments = arguments,
+                    UseShellExecute = true,
+                    Verb = "runas",
+                    WindowStyle = ProcessWindowStyle.Hidden
+                };
+
+                using var elevatedProcess = Process.Start(elevatedInfo);
+                if (elevatedProcess == null)
+                    return new ProcessExecutionResult(-1, string.Empty, "Jarayonni ishga tushirib bo'lmadi.");
+
+                await elevatedProcess.WaitForExitAsync();
+                return new ProcessExecutionResult(elevatedProcess.ExitCode, string.Empty, string.Empty);
+            }
+            catch (Win32Exception ex) when (ex.NativeErrorCode == 1223)
+            {
+                return new ProcessExecutionResult(-1, string.Empty, "UAC bekor qilindi.");
+            }
+            catch (Exception ex)
+            {
+                return new ProcessExecutionResult(-1, string.Empty, ex.Message);
+            }
         }
 
         try
@@ -236,16 +178,6 @@ try {{
         {
             return new ProcessExecutionResult(-1, string.Empty, ex.Message);
         }
-    }
-
-    public static async Task<ProcessExecutionResult> RunPowerShellCommandAsync(string script, bool requireAdmin = false)
-    {
-        if (requireAdmin)
-        {
-            return await RunElevatedScriptAsync(script);
-        }
-
-        return await RunScriptInProcessAsync(script);
     }
 
     public static ProcessExecutionResult RunScriptInProcess(string script)

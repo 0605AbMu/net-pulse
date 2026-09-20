@@ -39,8 +39,7 @@ jobs:
       - name: Build project
         run: dotnet build NetPulse/NetPulse.csproj -c Release --no-restore
 
-  # 2. Versiyalangan Release va Inno Setup paketi:
-  # Har bir versiya tegi (v1.0.0), manual release yoki main branchga yangilanishda ishlaydi
+  # 2. Versiyalangan Release: Ham Installer (.exe), ham Dasturning o'zi (Portable .exe)
   release:
     name: Package & Release (.exe)
     if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
@@ -87,7 +86,31 @@ jobs:
       - name: Restore dependencies
         run: dotnet restore NetPulse/NetPulse.csproj
 
-      - name: Publish application (win-x64 self-contained with version)
+      # 2.1. Dasturning o'zini (Portable Single-File .exe) yaratish
+      - name: Publish Portable Standalone App (.exe)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path "./dist" -Force | Out-Null
+
+          dotnet publish NetPulse/NetPulse.csproj `
+            -c Release `
+            -r win-x64 `
+            --self-contained true `
+            -p:PublishSingleFile=true `
+            -p:IncludeNativeLibrariesForSelfExtract=true `
+            -p:EnableCompressionInSingleFile=true `
+            -p:Version=${{ env.VERSION }} `
+            -p:AssemblyVersion=${{ env.VERSION }} `
+            -p:FileVersion=${{ env.VERSION }} `
+            -p:InformationalVersion=${{ env.VERSION }} `
+            -o ./portable
+
+          Copy-Item ./portable/NetPulse.exe "./dist/NetPulse-v${{ env.VERSION }}-Portable.exe" -Force
+          Copy-Item ./portable/NetPulse.exe "./dist/NetPulse.exe" -Force
+          Write-Host "Portable dastur yaratildi: dist/NetPulse-v${{ env.VERSION }}-Portable.exe" -ForegroundColor Green
+
+      # 2.2. O'rnatuvchi (Inno Setup Installer .exe) uchun fayllarni publish qilish
+      - name: Publish files for Inno Setup
         shell: pwsh
         run: |
           dotnet publish NetPulse/NetPulse.csproj `
@@ -107,7 +130,8 @@ jobs:
           choco install innosetup --no-progress -y
           echo "C:\Program Files (x86)\Inno Setup 6" >> $env:GITHUB_PATH
 
-      - name: Compile Inno Setup Installer
+      # 2.3. Inno Setup orqali Setup.exe ni yig'ish
+      - name: Compile Inno Setup Installer (.exe)
         shell: pwsh
         run: |
           $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
@@ -122,65 +146,56 @@ jobs:
             "/DOutputDir=output" `
             installer\NetPulse.iss
 
-      - name: Prepare Artifacts & Checksums
-        shell: pwsh
-        run: |
-          $ver = "${{ env.VERSION }}"
-          $outputDir = "installer\output"
-          $versionedExe = Join-Path $outputDir "NetPulse-Setup-v$ver.exe"
-          $genericExe = Join-Path $outputDir "NetPulse-Setup.exe"
-
-          if (-not (Test-Path $versionedExe)) {
-            Write-Error "O'rnatuvchi fayl topilmadi: $versionedExe"
+          $installerVer = "installer\output\NetPulse-Setup-v${{ env.VERSION }}.exe"
+          if (Test-Path $installerVer) {
+            Copy-Item $installerVer "./dist/NetPulse-Setup-v${{ env.VERSION }}.exe" -Force
+            Copy-Item $installerVer "./dist/NetPulse-Setup.exe" -Force
+            Write-Host "Inno Setup o'rnatuvchi yaratildi: dist/NetPulse-Setup-v${{ env.VERSION }}.exe" -ForegroundColor Green
+          } else {
+            Write-Error "O'rnatuvchi fayl topilmadi: $installerVer"
             exit 1
           }
 
-          # Generic nusxasini ham yaratamiz (avto-yangilovchi URL lari uchun qulay bo'lishi uchun)
-          Copy-Item $versionedExe $genericExe -Force
+      - name: List Release Executables
+        shell: pwsh
+        run: |
+          Write-Host "Chiqariladigan barcha .exe fayllar:" -ForegroundColor Cyan
+          Get-ChildItem "./dist" -Filter "*.exe" | Select-Object Name, Length, LastWriteTime
 
-          # SHA256 checksum hisoblash
-          $hashVersioned = (Get-FileHash -Algorithm SHA256 $versionedExe).Hash
-          $hashGeneric = (Get-FileHash -Algorithm SHA256 $genericExe).Hash
-          
-          $checksumContent = @"
-$hashVersioned  NetPulse-Setup-v$ver.exe
-$hashGeneric  NetPulse-Setup.exe
-"@
-          Set-Content -Path (Join-Path $outputDir "checksums.txt") -Value $checksumContent -Encoding UTF8
-
-          # Yangilanishlarni tekshirish uchun version.json metadata fayli
-          $dateStr = (Get-Date).ToString("yyyy-MM-ddTHH:mm:ssZ")
-          $versionMeta = @"
-{
-  "version": "$ver",
-  "releaseDate": "$dateStr",
-  "downloadUrl": "https://github.com/${{ github.repository }}/releases/download/v$ver/NetPulse-Setup-v$ver.exe",
-  "checksumSha256": "$hashVersioned"
-}
-"@
-          Set-Content -Path (Join-Path $outputDir "version.json") -Value $versionMeta -Encoding UTF8
-          Write-Host "Barcha chiqarish fayllari muvaffaqiyatli tayyorlandi:" -ForegroundColor Green
-          Get-ChildItem $outputDir | Select-Object Name, Length
-
-      - name: Upload Artifacts to Workflow
+      - name: Upload Artifacts to Workflow Run
         uses: actions/upload-artifact@v4
         with:
-          name: NetPulse-v${{ env.VERSION }}
+          name: NetPulse-Executables-v${{ env.VERSION }}
           path: |
-            installer/output/NetPulse-Setup-v${{ env.VERSION }}.exe
-            installer/output/NetPulse-Setup.exe
-            installer/output/checksums.txt
-            installer/output/version.json
+            dist/NetPulse-Setup-v${{ env.VERSION }}.exe
+            dist/NetPulse-Setup.exe
+            dist/NetPulse-v${{ env.VERSION }}-Portable.exe
+            dist/NetPulse.exe
           if-no-files-found: error
 
-      - name: Publish GitHub Release (.exe Installer)
+      # 2.4. GitHub Release sahifasida har ikkalasini (.exe) alohida ko'rinadigan qilib chiqarish
+      - name: Publish GitHub Release (Installer & Portable .exe)
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            installer/output/NetPulse-Setup-v${{ env.VERSION }}.exe
-            installer/output/NetPulse-Setup.exe
+            dist/NetPulse-Setup-v${{ env.VERSION }}.exe
+            dist/NetPulse-Setup.exe
+            dist/NetPulse-v${{ env.VERSION }}-Portable.exe
+            dist/NetPulse.exe
           tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('v{0}', env.VERSION) }}
           name: NetPulse v${{ env.VERSION }}
+          body: |
+            ## NetPulse v${{ env.VERSION }} chiqarildi!
+
+            Quyidagi fayllardan birini tanlab yuklab olishingiz mumkin (barchasi to'g'ridan-to'g'ri **`.exe`** formatida):
+
+            ### 📦 1. O'rnatuvchi (Installer):
+            - **`NetPulse-Setup-v${{ env.VERSION }}.exe`** — Dasturni to'liq kompyuterga o'rnatish, Ish stoli va Bosh menyuda yorliq yaratish hamda keyinchalik oson yangilash uchun o'rnatuvchi.
+            - **`NetPulse-Setup.exe`** — Doimiy universal havoladagi o'rnatuvchi.
+
+            ### 🚀 2. Dasturning o'zi (Portable Standalone):
+            - **`NetPulse-v${{ env.VERSION }}-Portable.exe`** — O'rnatish talab etilmaydigan, to'g'ridan-to'g'ri ishga tushadigan dasturning o'zi (Single-file).
+            - **`NetPulse.exe`** — Universal nomdagi dasturning o'zi.
           draft: false
           prerelease: false
           generate_release_notes: true

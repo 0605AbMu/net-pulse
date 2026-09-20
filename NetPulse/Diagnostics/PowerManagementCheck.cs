@@ -29,8 +29,10 @@ public class PowerManagementCheck : INetworkCheck
             return result;
         }
 
-        // Query powercfg wireless power saving mode
-        var procResult = await AdminHelper.RunCommandAsync("powercfg.exe", "/query SCHEME_CURRENT 19cbb8fa-5279-450e-9f80-4a60194f514b 12bbe462-763e-4327-a180-a69144c93be8");
+        // Query powercfg wireless power saving mode (Official Windows Wireless Adapter Settings GUIDs)
+        const string wirelessSubgroup = "19cbb8fa-5279-450e-9fac-8a3d5fedd0c1";
+        const string powerSavingSetting = "12bbebe6-58d6-4636-95bb-3217ef867c1a";
+        var procResult = await AdminHelper.RunCommandAsync("powercfg.exe", $"/query SCHEME_CURRENT {wirelessSubgroup} {powerSavingSetting}");
 
         bool isPowerSavingActive = false;
         if (procResult.Success)

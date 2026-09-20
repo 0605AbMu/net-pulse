@@ -64,11 +64,28 @@ public static class RepairEngine
 
     public static async Task<RepairActionResult> ExecuteActionAsync(RepairActionId actionId, NetworkInfo? netInfo = null)
     {
+        // If action requires administrator and current process is not admin, elevate cleanly via NetPulse internal action
+        if (actionId != RepairActionId.FlushDns && !AdminHelper.IsAdministrator())
+        {
+            return await AdminHelper.RunElevatedActionAsync(actionId, netInfo?.AdapterName);
+        }
+
+        return await ExecuteActionInternalAsync(actionId, netInfo);
+    }
+
+    public static Task<RepairActionResult> OptimizeAllAsync(NetworkInfo? netInfo = null) =>
+        ExecuteActionAsync(RepairActionId.OptimizeAll, netInfo);
+
+    /// <summary>
+    /// Executes the repair action natively inside the application without any external script files.
+    /// </summary>
+    public static async Task<RepairActionResult> ExecuteActionInternalAsync(RepairActionId actionId, NetworkInfo? netInfo = null)
+    {
         return actionId switch
         {
-            RepairActionId.OptimizeAll => await OptimizeAllAsync(netInfo),
+            RepairActionId.OptimizeAll => await OptimizeAllInternalAsync(netInfo),
             RepairActionId.TcpAutoTuning => await FixTcpAutoTuningAsync(),
-            RepairActionId.NetworkThrottling => await FixNetworkThrottlingAsync(),
+            RepairActionId.NetworkThrottling => FixNetworkThrottlingDirect(),
             RepairActionId.PowerSaving => await FixPowerSavingAsync(),
             RepairActionId.DnsCloudflare => await SetDnsAsync(netInfo?.AdapterName ?? "Wi-Fi", "1.1.1.1", "1.0.0.1"),
             RepairActionId.DnsGoogle => await SetDnsAsync(netInfo?.AdapterName ?? "Wi-Fi", "8.8.8.8", "8.8.4.4"),
@@ -80,41 +97,35 @@ public static class RepairEngine
 
     public static async Task<RepairActionResult> FixTcpAutoTuningAsync()
     {
-        var script = @"
-netsh interface tcp set global autotuninglevel=normal
-netsh interface tcp set global rss=enabled
-";
-        var proc = await AdminHelper.RunElevatedScriptAsync(script);
-        if (proc.Success)
+        var p1 = await AdminHelper.RunCommandAsync("netsh.exe", "interface tcp set global autotuninglevel=normal", requireAdmin: true);
+        var p2 = await AdminHelper.RunCommandAsync("netsh.exe", "interface tcp set global rss=enabled", requireAdmin: true);
+
+        if (p1.Success && p2.Success)
         {
             return RepairActionResult.Ok(LocalizationService.Get("Repair_TcpSuccess"));
         }
 
-        var errorMsg = !string.IsNullOrWhiteSpace(proc.Error) ? proc.Error : proc.Output;
+        var errorMsg = !string.IsNullOrWhiteSpace(p1.Error) ? p1.Error : p2.Error;
         return RepairActionResult.Fail(LocalizationService.Get("Repair_TcpError", errorMsg));
     }
 
-    public static async Task<RepairActionResult> FixNetworkThrottlingAsync()
+    public static RepairActionResult FixNetworkThrottlingDirect()
     {
         try
         {
-            var psScript = @"
-Set-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile' -Name 'NetworkThrottlingIndex' -Value 4294967295 -Type DWord -Force
-Set-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile' -Name 'SystemResponsiveness' -Value 0 -Type DWord -Force
-";
-            var proc = await AdminHelper.RunElevatedScriptAsync(psScript);
-
-            if (proc.Success)
+            using var key = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile", writable: true);
+            if (key != null)
             {
+                key.SetValue("NetworkThrottlingIndex", unchecked((int)0xFFFFFFFF), RegistryValueKind.DWord);
+                key.SetValue("SystemResponsiveness", 0, RegistryValueKind.DWord);
                 return RepairActionResult.Ok(LocalizationService.Get("Repair_ThrottleSuccess"));
             }
 
-            var errorMsg = !string.IsNullOrWhiteSpace(proc.Error) ? proc.Error : proc.Output;
-            return RepairActionResult.Fail(LocalizationService.Get("Repair_ThrottleError", errorMsg));
+            return RepairActionResult.Fail(LocalizationService.Get("Repair_ThrottleError", "Registry kaliti ochilmadi (Administrator huquqi zarur)."));
         }
         catch (Exception ex)
         {
-            return RepairActionResult.Fail(ex.Message);
+            return RepairActionResult.Fail(LocalizationService.Get("Repair_ThrottleError", ex.Message));
         }
     }
 
@@ -122,19 +133,18 @@ Set-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multi
     {
         try
         {
-            var script = @"
-powercfg /setacvalueindex SCHEME_CURRENT 19cbb8fa-5279-450e-9f80-4a60194f514b 12bbe462-763e-4327-a180-a69144c93be8 0
-powercfg /setdcvalueindex SCHEME_CURRENT 19cbb8fa-5279-450e-9f80-4a60194f514b 12bbe462-763e-4327-a180-a69144c93be8 0
-powercfg /SetActive SCHEME_CURRENT
-";
-            var proc = await AdminHelper.RunElevatedScriptAsync(script);
+            const string wirelessSubgroup = "19cbb8fa-5279-450e-9fac-8a3d5fedd0c1";
+            const string powerSavingSetting = "12bbebe6-58d6-4636-95bb-3217ef867c1a";
+            var p1 = await AdminHelper.RunCommandAsync("powercfg.exe", $"/setacvalueindex SCHEME_CURRENT {wirelessSubgroup} {powerSavingSetting} 0", requireAdmin: true);
+            var p2 = await AdminHelper.RunCommandAsync("powercfg.exe", $"/setdcvalueindex SCHEME_CURRENT {wirelessSubgroup} {powerSavingSetting} 0", requireAdmin: true);
+            var p3 = await AdminHelper.RunCommandAsync("powercfg.exe", "/SetActive SCHEME_CURRENT", requireAdmin: true);
 
-            if (proc.Success)
+            if (p1.Success && p2.Success && p3.Success)
             {
                 return RepairActionResult.Ok(LocalizationService.Get("Repair_PowerSuccess"));
             }
 
-            var errorMsg = !string.IsNullOrWhiteSpace(proc.Error) ? proc.Error : proc.Output;
+            var errorMsg = !string.IsNullOrWhiteSpace(p1.Error) ? p1.Error : (!string.IsNullOrWhiteSpace(p2.Error) ? p2.Error : p3.Error);
             return RepairActionResult.Fail(LocalizationService.Get("Repair_PowerError", errorMsg));
         }
         catch (Exception ex)
@@ -147,18 +157,22 @@ powercfg /SetActive SCHEME_CURRENT
     {
         try
         {
-            var psScript = $@"
-Set-DnsClientServerAddress -InterfaceAlias '{adapterName}' -ServerAddresses ('{primaryDns}','{secondaryDns}') -ErrorAction SilentlyContinue
-Clear-DnsClientCache
-";
-            var proc = await AdminHelper.RunElevatedScriptAsync(psScript);
+            if (!System.Net.IPAddress.TryParse(primaryDns, out _) || !System.Net.IPAddress.TryParse(secondaryDns, out _))
+            {
+                return RepairActionResult.Fail(LocalizationService.Get("Repair_DnsError", "Yaroqsiz IP manzil formati"));
+            }
 
-            if (proc.Success)
+            // Direct netsh command execution
+            var p1 = await AdminHelper.RunCommandAsync("netsh.exe", $"interface ipv4 set dns name=\"{adapterName}\" static {primaryDns} primary", requireAdmin: true);
+            var p2 = await AdminHelper.RunCommandAsync("netsh.exe", $"interface ipv4 add dns name=\"{adapterName}\" {secondaryDns} index=2", requireAdmin: true);
+            await AdminHelper.RunCommandAsync("ipconfig.exe", "/flushdns");
+
+            if (p1.Success)
             {
                 return RepairActionResult.Ok(LocalizationService.Get("Repair_DnsSuccess", adapterName, primaryDns, secondaryDns));
             }
 
-            var errorMsg = !string.IsNullOrWhiteSpace(proc.Error) ? proc.Error : proc.Output;
+            var errorMsg = !string.IsNullOrWhiteSpace(p1.Error) ? p1.Error : p1.Output;
             return RepairActionResult.Fail(LocalizationService.Get("Repair_DnsError", errorMsg));
         }
         catch (Exception ex)
@@ -171,19 +185,16 @@ Clear-DnsClientCache
     {
         try
         {
-            var script = @"
-netsh winsock reset
-netsh int ip reset
-ipconfig /flushdns
-";
-            var proc = await AdminHelper.RunElevatedScriptAsync(script);
+            var p1 = await AdminHelper.RunCommandAsync("netsh.exe", "winsock reset", requireAdmin: true);
+            var p2 = await AdminHelper.RunCommandAsync("netsh.exe", "int ip reset", requireAdmin: true);
+            await AdminHelper.RunCommandAsync("ipconfig.exe", "/flushdns");
 
-            if (proc.Success)
+            if (p1.Success || p2.Success)
             {
                 return RepairActionResult.Ok(LocalizationService.Get("Repair_ResetStackSuccess"), requiresRestart: true);
             }
 
-            var errorMsg = !string.IsNullOrWhiteSpace(proc.Error) ? proc.Error : proc.Output;
+            var errorMsg = !string.IsNullOrWhiteSpace(p1.Error) ? p1.Error : p1.Output;
             return RepairActionResult.Fail(LocalizationService.Get("Repair_ResetStackError", errorMsg));
         }
         catch (Exception ex)
@@ -200,64 +211,14 @@ ipconfig /flushdns
             : RepairActionResult.Fail(LocalizationService.Get("Repair_FlushDnsError"));
     }
 
-    public static async Task<RepairActionResult> OptimizeAllAsync(NetworkInfo? netInfo)
+    private static async Task<RepairActionResult> OptimizeAllInternalAsync(NetworkInfo? netInfo)
     {
-        // Execute all optimizations in a SINGLE script so Windows asks for UAC elevation only ONCE.
-        var script = @"
-$log = @()
+        var r1 = await FixTcpAutoTuningAsync();
+        var r2 = FixNetworkThrottlingDirect();
+        var r3 = await FixPowerSavingAsync();
+        await FlushDnsAsync();
 
-# 1. TCP Window Auto-Tuning & Offload
-try {
-    netsh interface tcp set global autotuninglevel=normal | Out-Null
-    netsh interface tcp set global rss=enabled | Out-Null
-    $log += 'TCP:OK'
-} catch {
-    $log += 'TCP:FAIL'
-}
-
-# 2. Network Throttling & System Responsiveness
-try {
-    Set-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile' -Name 'NetworkThrottlingIndex' -Value 4294967295 -Type DWord -Force
-    Set-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile' -Name 'SystemResponsiveness' -Value 0 -Type DWord -Force
-    $log += 'THROTTLE:OK'
-} catch {
-    $log += 'THROTTLE:FAIL'
-}
-
-# 3. Wi-Fi Power Saving (Maximum Performance)
-try {
-    powercfg /setacvalueindex SCHEME_CURRENT 19cbb8fa-5279-450e-9f80-4a60194f514b 12bbe462-763e-4327-a180-a69144c93be8 0 | Out-Null
-    powercfg /setdcvalueindex SCHEME_CURRENT 19cbb8fa-5279-450e-9f80-4a60194f514b 12bbe462-763e-4327-a180-a69144c93be8 0 | Out-Null
-    powercfg /SetActive SCHEME_CURRENT | Out-Null
-    $log += 'POWER:OK'
-} catch {
-    $log += 'POWER:FAIL'
-}
-
-# 4. Flush DNS
-try {
-    ipconfig /flushdns | Out-Null
-    $log += 'DNS:OK'
-} catch {
-    $log += 'DNS:FAIL'
-}
-
-Write-Output ($log -join ';')
-";
-
-        var proc = await AdminHelper.RunElevatedScriptAsync(script);
-
-        if (!proc.Success && string.IsNullOrWhiteSpace(proc.Output))
-        {
-            return RepairActionResult.Fail(LocalizationService.Get("Repair_AdminRequired"));
-        }
-
-        var results = proc.Output.Trim().Split(';', StringSplitOptions.RemoveEmptyEntries);
-        var tcpOk = results.Any(r => r.Trim() == "TCP:OK");
-        var throttleOk = results.Any(r => r.Trim() == "THROTTLE:OK");
-        var powerOk = results.Any(r => r.Trim() == "POWER:OK");
-
-        var allSuccess = tcpOk && throttleOk && powerOk;
+        var allSuccess = r1.Success && r2.Success && r3.Success;
 
         return allSuccess
             ? RepairActionResult.Ok(LocalizationService.Get("Repair_OptimizeAllSuccess"))
