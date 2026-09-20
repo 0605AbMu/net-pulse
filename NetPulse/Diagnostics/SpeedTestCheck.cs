@@ -31,7 +31,7 @@ public class SpeedTestCheck : INetworkCheck
 
         try
         {
-            var speedMbps = await NetworkHelper.TestDownloadSpeedMbpsAsync();
+            var speedMbps = await NetworkHelper.TestDownloadSpeedMbpsAsync(defaultGateway: info.DefaultGateway);
 
             var linkSpeed = Math.Max(info.ReceiveRateMbps, info.TransmitRateMbps);
             var linkText = linkSpeed > 0 ? $"{linkSpeed} Mbps" : LocalizationService.Get("Check_SpeedTest_Unknown");

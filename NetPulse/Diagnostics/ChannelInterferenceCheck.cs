@@ -29,7 +29,7 @@ public class ChannelInterferenceCheck : INetworkCheck
             return result;
         }
 
-        var neighborCount = await NetworkHelper.GetNearbyNetworksCountOnSameChannelAsync(info.Channel);
+        var neighborCount = await NetworkHelper.GetNearbyNetworksCountOnSameChannelAsync(info.Channel, info.Bssid, info.Ssid);
 
         var bandInfo = info.BandDisplay;
 

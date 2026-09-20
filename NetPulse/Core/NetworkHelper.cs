@@ -370,7 +370,7 @@ public static class NetworkHelper
         return null;
     }
 
-    public static async Task<int> GetNearbyNetworksCountOnSameChannelAsync(int currentChannel)
+    public static async Task<int> GetNearbyNetworksCountOnSameChannelAsync(int currentChannel, MacAddress? ownBssid = null, string? ownSsid = null)
     {
         if (currentChannel <= 0) return 0;
         try
@@ -378,17 +378,50 @@ public static class NetworkHelper
             var proc = await AdminHelper.RunCommandAsync("netsh.exe", "wlan show networks mode=bssid");
             if (proc.ExitCode != 0) return 0;
 
-            var channelMatches = Regex.Matches(proc.Output, @"Channel\s*:\s*(\d+)", RegexOptions.IgnoreCase);
+            var lines = proc.Output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
             int count = 0;
-            foreach (Match m in channelMatches)
+            string currentNetworkSsid = string.Empty;
+            bool isCurrentNetworkOwn = false;
+
+            foreach (var line in lines)
             {
-                if (int.TryParse(m.Groups[1].Value, out var ch) && ch == currentChannel)
+                var trimmed = line.Trim();
+                if (trimmed.StartsWith("SSID ", StringComparison.OrdinalIgnoreCase))
                 {
-                    count++;
+                    var parts = trimmed.Split(':', 2);
+                    if (parts.Length > 1)
+                    {
+                        currentNetworkSsid = parts[1].Trim();
+                        isCurrentNetworkOwn = !string.IsNullOrEmpty(ownSsid) &&
+                            string.Equals(currentNetworkSsid, ownSsid, StringComparison.OrdinalIgnoreCase);
+                    }
+                }
+                else if (trimmed.StartsWith("BSSID ", StringComparison.OrdinalIgnoreCase))
+                {
+                    var parts = trimmed.Split(':', 2);
+                    if (parts.Length > 1)
+                    {
+                        var bssidStr = parts[1].Trim();
+                        if (ownBssid.HasValue && MacAddress.TryParse(bssidStr, out var parsedBssid) && parsedBssid == ownBssid.Value)
+                        {
+                            isCurrentNetworkOwn = true;
+                        }
+                    }
+                }
+                else if (trimmed.StartsWith("Channel", StringComparison.OrdinalIgnoreCase))
+                {
+                    var parts = trimmed.Split(':', 2);
+                    if (parts.Length > 1 && int.TryParse(parts[1].Trim(), out var ch) && ch == currentChannel)
+                    {
+                        if (!isCurrentNetworkOwn)
+                        {
+                            count++;
+                        }
+                    }
                 }
             }
-            // Exclude own network
-            return Math.Max(0, count - 1);
+
+            return count;
         }
         catch
         {
@@ -399,19 +432,47 @@ public static class NetworkHelper
     public static async Task<double> TestDownloadSpeedMbpsAsync(
         IProgress<double>? progress = null, 
         IProgress<SpeedTestProgress>? detailedProgress = null,
+        IPAddress? defaultGateway = null,
         CancellationToken cancellationToken = default)
     {
         const int streamCount = 2;
         const int testDurationMs = 5500;
 
-        // 1. Initial Quick Ping check (measures latency to Cloudflare 1.1.1.1)
-        int initialPing = 18;
+        // 1. Initial Quick Ping check (real ping to Gateway, 1.1.1.1, or 8.8.8.8)
+        int initialPing = 0;
         try
         {
-            var pingResult = await PingAsync("1.1.1.1", count: 2, timeoutMs: 800);
-            if (pingResult.AvgLatencyMs > 0) initialPing = pingResult.AvgLatencyMs;
+            var pingTargets = new List<string>();
+            if (defaultGateway != null) pingTargets.Add(defaultGateway.ToString());
+            pingTargets.Add("1.1.1.1");
+            pingTargets.Add("8.8.8.8");
+
+            foreach (var target in pingTargets)
+            {
+                var pingResult = await PingAsync(target, count: 2, timeoutMs: 600);
+                if (pingResult.AvgLatencyMs > 0)
+                {
+                    initialPing = pingResult.AvgLatencyMs;
+                    break;
+                }
+            }
+
+            // Fallback: If ICMP is blocked, measure TCP connection latency to Cloudflare
+            if (initialPing <= 0)
+            {
+                var swPing = Stopwatch.StartNew();
+                using var tcpClient = new TcpClient();
+                var connectTask = tcpClient.ConnectAsync("1.1.1.1", 80);
+                if (await Task.WhenAny(connectTask, Task.Delay(800, cancellationToken)) == connectTask && tcpClient.Connected)
+                {
+                    swPing.Stop();
+                    initialPing = Math.Max(1, (int)swPing.ElapsedMilliseconds);
+                }
+            }
         }
         catch { }
+
+        var connectingStatus = Localization.LocalizationService.Get("SpeedTest_StatusConnecting", initialPing);
 
         detailedProgress?.Report(new SpeedTestProgress
         {
@@ -420,7 +481,7 @@ public static class NetworkHelper
             TotalMb = 0.0,
             PingMs = initialPing,
             Percent = 5,
-            StatusText = $"Ping: {initialPing} ms • Ulanish tekshirilmoqda..."
+            StatusText = connectingStatus
         });
 
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -450,7 +511,6 @@ public static class NetworkHelper
         }).ToList();
 
         // 2. Sliding window measurement with Exponential Moving Average (EMA)
-        // Keeps track of (TimestampMs, TotalBytes) history for last 800ms
         var history = new Queue<(long TimestampMs, long Bytes)>();
         var speedSamples = new List<double>();
 
@@ -484,7 +544,7 @@ public static class NetworkHelper
             {
                 double instantSpeed = (windowBytes * 8.0) / windowSec / 1_000_000.0;
 
-                // Smooth exponential climb (never starts high, climbs smoothly from 0)
+                // Smooth exponential climb
                 if (displayedSpeed < 0.1)
                 {
                     displayedSpeed = instantSpeed * 0.4;
@@ -506,6 +566,8 @@ public static class NetworkHelper
                 var currentRounded = Math.Round(displayedSpeed, 1);
                 progress?.Report(currentRounded);
 
+                var measuringStatus = Localization.LocalizationService.Get("SpeedTest_StatusMeasuring", currentRounded, totalMb);
+
                 detailedProgress?.Report(new SpeedTestProgress
                 {
                     CurrentMbps = currentRounded,
@@ -513,7 +575,7 @@ public static class NetworkHelper
                     TotalMb = Math.Round(totalMb, 1),
                     PingMs = initialPing,
                     Percent = percent,
-                    StatusText = $"O'lchanmoqda: {currentRounded} Mbps • Yuklandi: {totalMb:F1} MB"
+                    StatusText = measuringStatus
                 });
             }
         }
@@ -539,6 +601,8 @@ public static class NetworkHelper
         var finalRounded = Math.Round(finalSpeed, 1);
         double finalTotalMb = Interlocked.Read(ref totalBytesRead) / 1_000_000.0;
 
+        var completedStatus = Localization.LocalizationService.Get("SpeedTest_StatusCompleted", finalRounded);
+
         progress?.Report(finalRounded);
         detailedProgress?.Report(new SpeedTestProgress
         {
@@ -547,7 +611,7 @@ public static class NetworkHelper
             TotalMb = Math.Round(finalTotalMb, 1),
             PingMs = initialPing,
             Percent = 100,
-            StatusText = $"Sinov yakunlandi! Barqaror tezlik: {finalRounded} Mbps"
+            StatusText = completedStatus
         });
 
         return finalRounded;
