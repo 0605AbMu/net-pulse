@@ -62,7 +62,11 @@ if (-not (Test-Path $publishedExe)) {
     exit 1
 }
 
-$destExe = "$OutputDir\NetPulse-v1.0.0-$Runtime.exe"
+[xml]$proj = Get-Content $projectPath
+$appVer = $proj.Project.PropertyGroup.Version
+if ([string]::IsNullOrWhiteSpace($appVer)) { $appVer = "1.1.0" }
+
+$destExe = "$OutputDir\NetPulse-v$appVer-$Runtime.exe"
 Copy-Item -Path $publishedExe -Destination $destExe -Force
 Copy-Item -Path $publishedExe -Destination "$OutputDir\NetPulse.exe" -Force
 

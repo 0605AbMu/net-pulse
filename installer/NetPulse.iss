@@ -6,7 +6,7 @@
 #endif
 
 #ifndef MyAppVersion
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "1.1.0"
 #endif
 
 #ifndef MyAppPublisher
@@ -112,3 +112,25 @@ begin
   UninstallKey := 'SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\{#SetupSetting("AppId")}_is1';
   Result := RegKeyExists(HKLM, UninstallKey) or RegKeyExists(HKCU, UninstallKey);
 end;
+
+// O'rnatish muvaffaqiyatli yakunlanganda Sentry ga o'rnatish metrikasini yuborish
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  ResultCode: Integer;
+  Params: String;
+  ExePath: String;
+begin
+  if CurStep = ssPostInstall then
+  begin
+    ExePath := ExpandConstant('{app}\{#MyAppExeName}');
+    if FileExists(ExePath) then
+    begin
+      Params := '--track-install --no-elevate';
+      if IsUpgrade() then
+        Params := Params + ' --is-upgrade';
+      // Fon rejimida (SW_HIDE) NetPulse ni ishga tushirib metrika yuboramiz va tugashini kutamiz
+      Exec(ExePath, Params, '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    end;
+  end;
+end;
+

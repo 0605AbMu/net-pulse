@@ -4,6 +4,7 @@ using CommunityToolkit.Mvvm.Input;
 using NetPulse.Core;
 using NetPulse.Localization;
 using NetPulse.Models;
+using Sentry;
 
 namespace NetPulse.ViewModels;
 
@@ -194,6 +195,7 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     public void SetLanguage(string lang)
     {
+        SentryService.TrackFeatureUsage("set_language", new() { ["language"] = lang });
         LocalizationService.Instance.CurrentLanguage = lang;
     }
 
@@ -229,6 +231,7 @@ public partial class MainViewModel : ObservableObject
         {
             SelectedDiagnosticFilter = parsed;
             ApplyFilter();
+            SentryService.TrackFeatureUsage("filter_diagnostics", new() { ["filter"] = filter });
         }
     }
 
@@ -237,17 +240,20 @@ public partial class MainViewModel : ObservableObject
     {
         SelectedDiagnosticFilter = filter;
         ApplyFilter();
+        SentryService.TrackFeatureUsage("filter_diagnostics", new() { ["filter"] = filter.ToString() });
     }
 
     [RelayCommand]
     public void NavigateTo(int index)
     {
         SelectedTabIndex = index;
+        SentryService.TrackFeatureUsage("navigate_tab", new() { ["tab_index"] = index });
     }
 
     [RelayCommand]
     public async Task RefreshNetworkInfoAsync()
     {
+        SentryService.TrackFeatureUsage("refresh_network");
         try
         {
             CurrentNetwork = await NetworkHelper.GetActiveNetworkInfoAsync();
@@ -264,6 +270,7 @@ public partial class MainViewModel : ObservableObject
     public void OpenDnsOptimizations()
     {
         SelectedTabIndex = 2;
+        SentryService.TrackFeatureUsage("navigate_dns_optimizations");
     }
     
     [RelayCommand]
@@ -271,6 +278,7 @@ public partial class MainViewModel : ObservableObject
     {
         SelectedTabIndex = 1;
         SetDiagnosticFilter(filter);
+        SentryService.TrackFeatureUsage("open_diagnostics", new() { ["filter"] = filter.ToString() });
     }
 
     public void UpdateDnsStatus()
@@ -304,6 +312,10 @@ public partial class MainViewModel : ObservableObject
     public async Task StartDiagnosticsAsync()
     {
         if (IsScanning) return;
+
+        SentryService.TrackFeatureUsage("diagnostics_scan");
+        var transaction = SentrySdk.StartTransaction("diagnostics_scan", "diagnostics.run");
+        SentrySdk.ConfigureScope(scope => scope.Transaction = transaction);
 
         IsScanning = true;
         SelectedDiagnosticFilter = DiagnosticFilter.All;
@@ -350,6 +362,7 @@ public partial class MainViewModel : ObservableObject
 
                 StatusMessage = LocalizationService.Get("StatusScanningStep", check.Title, stepIndex, total);
                 AppLogger.Log($"[NetPulse] Running check {stepIndex}/{total}: {check.Id} ({check.Title})...");
+                SentryService.TrackFeatureUsage("diagnostic_check", new() { ["check_id"] = check.Id });
 
                 DiagnosticResult res;
                 try
@@ -359,6 +372,8 @@ public partial class MainViewModel : ObservableObject
                 }
                 catch (Exception checkEx)
                 {
+                    transaction.Status = SpanStatus.InternalError;
+                    transaction.SetTag("error", $"check_error_{check.Id}");
                     AppLogger.LogError($"[NetPulse Check Error - {check.Id}]", checkEx);
                     AppendRepairLog($"❌ [{check.Title} tekshiruvida xatolik]: {checkEx.Message}");
 
@@ -391,9 +406,19 @@ public partial class MainViewModel : ObservableObject
 
             StatusMessage = LocalizationService.Get("StatusScanCompleted", HealthStatusText, HealthScore);
             AppLogger.Log($"[NetPulse] Diagnostics completed. Score: {HealthScore}/100 ({HealthStatusText})");
+
+            if (transaction.Status == null)
+            {
+                transaction.Finish(SpanStatus.Ok);
+            }
+            else
+            {
+                transaction.Finish();
+            }
         }
         catch (Exception ex)
         {
+            transaction.Finish(SpanStatus.InternalError);
             AppLogger.LogError("\n[NetPulse DIAGNOSTICS FATAL ERROR]", ex);
             AppendRepairLog($"\n❌ [DIAGNOSTIKA XATOLIK]: {ex.Message}\n{ex.StackTrace}");
             StatusMessage = LocalizationService.Get("StatusScanError", ex.Message);
@@ -416,6 +441,12 @@ public partial class MainViewModel : ObservableObject
     private async Task HandleItemRepairAsync(DiagnosticItemViewModel item)
     {
         if (!item.RepairActionId.HasValue) return;
+
+        SentryService.TrackFeatureUsage("item_repair", new()
+        {
+            ["check_id"] = item.CheckId,
+            ["action_id"] = item.RepairActionId.Value.ToString()
+        });
 
         var result = await RepairEngine.ExecuteActionAsync(item.RepairActionId.Value, CurrentNetwork);
         if (result.Success)
@@ -452,18 +483,38 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     public async Task QuickOptimizeAsync()
     {
+        SentryService.TrackFeatureUsage("quick_optimize");
+        var transaction = SentrySdk.StartTransaction("quick_optimize", "repair.optimize_all");
+        SentrySdk.ConfigureScope(scope => scope.Transaction = transaction);
+
         StatusMessage = LocalizationService.Get("StatusOptimizingAll");
         AppendRepairLog("\n--- ⚡ TEZKOR OPTIMIZATSIYA BOSHLANDI ---");
 
-        var res = await RepairEngine.OptimizeAllAsync(CurrentNetwork);
-        AppendRepairLog(res.Message);
+        try
+        {
+            var res = await RepairEngine.OptimizeAllAsync(CurrentNetwork);
+            AppendRepairLog(res.Message);
 
-        StatusMessage = res.Success 
-            ? LocalizationService.Get("StatusOptimizedSuccess")
-            : LocalizationService.Get("StatusOptimizedPartial");
+            if (!res.Success)
+            {
+                transaction.Status = SpanStatus.InternalError;
+                transaction.SetTag("error", "quick_optimize_partial");
+            }
+            transaction.Finish(transaction.Status ?? SpanStatus.Ok);
 
-        // Re-run diagnostics to reflect improvements
-        await StartDiagnosticsAsync();
+            StatusMessage = res.Success 
+                ? LocalizationService.Get("StatusOptimizedSuccess")
+                : LocalizationService.Get("StatusOptimizedPartial");
+
+            // Re-run diagnostics to reflect improvements
+            await StartDiagnosticsAsync();
+        }
+        catch (Exception ex)
+        {
+            transaction.Finish(SpanStatus.InternalError);
+            AppLogger.LogError("[QuickOptimize Error]", ex);
+            throw;
+        }
     }
 
     [RelayCommand]
@@ -471,37 +522,53 @@ public partial class MainViewModel : ObservableObject
     {
         if (action == null) return;
 
+        SentryService.TrackFeatureUsage("repair_action", new() { ["action_id"] = action.Id.ToString() });
+        var transaction = SentrySdk.StartTransaction($"repair_{action.Id}", "repair.action");
+        SentrySdk.ConfigureScope(scope => scope.Transaction = transaction);
+
         StatusMessage = LocalizationService.Get("StatusActionExecuting", action.Title);
         AppendRepairLog($"\n🔧 [{action.Title}] bajarilmoqda...");
 
-        var res = await RepairEngine.ExecuteActionAsync(action.Id, CurrentNetwork);
-        if (res.Success)
+        try
         {
-            AppendRepairLog($"✅ Natija: {res.Message}");
-            StatusMessage = LocalizationService.Get("StatusActionSuccess", action.Title);
-
-            // If an item in diagnostics matched this, update it
-            var matchingItem = DiagnosticItems.FirstOrDefault(i => i.RepairActionId == action.Id);
-            if (matchingItem != null)
+            var res = await RepairEngine.ExecuteActionAsync(action.Id, CurrentNetwork);
+            if (res.Success)
             {
-                matchingItem.Status = DiagnosticStatus.Success;
-                matchingItem.IsRepaired = true;
-                matchingItem.RepairMessage = LocalizationService.Get("RepairedSuccess");
-                UpdateCounts();
-                ApplyFilter();
+                transaction.Finish(SpanStatus.Ok);
+                AppendRepairLog($"✅ Natija: {res.Message}");
+                StatusMessage = LocalizationService.Get("StatusActionSuccess", action.Title);
+
+                // If an item in diagnostics matched this, update it
+                var matchingItem = DiagnosticItems.FirstOrDefault(i => i.RepairActionId == action.Id);
+                if (matchingItem != null)
+                {
+                    matchingItem.Status = DiagnosticStatus.Success;
+                    matchingItem.IsRepaired = true;
+                    matchingItem.RepairMessage = LocalizationService.Get("RepairedSuccess");
+                    UpdateCounts();
+                    ApplyFilter();
+                }
+
+                await RefreshNetworkInfoAsync();
+
+                if (action.Id == RepairActionId.OptimizeAll)
+                {
+                    await StartDiagnosticsAsync();
+                }
             }
-
-            await RefreshNetworkInfoAsync();
-
-            if (action.Id == RepairActionId.OptimizeAll)
+            else
             {
-                await StartDiagnosticsAsync();
+                transaction.Status = SpanStatus.InternalError;
+                transaction.SetTag("error", "repair_action_failed");
+                transaction.Finish();
+                AppendRepairLog($"❌ Xatolik: {res.Message}");
+                StatusMessage = LocalizationService.Get("StatusActionError", res.Message);
             }
         }
-        else
+        catch (Exception ex)
         {
-            AppendRepairLog($"❌ Xatolik: {res.Message}");
-            StatusMessage = LocalizationService.Get("StatusActionError", res.Message);
+            transaction.Finish(SpanStatus.InternalError);
+            AppLogger.LogError($"[Repair Action Error - {action.Id}]", ex);
         }
     }
 
@@ -509,6 +576,10 @@ public partial class MainViewModel : ObservableObject
     public async Task RunStandaloneSpeedTestAsync()
     {
         if (IsTestingSpeed) return;
+
+        SentryService.TrackFeatureUsage("speed_test");
+        var transaction = SentrySdk.StartTransaction("speed_test", "network.speed_test");
+        SentrySdk.ConfigureScope(scope => scope.Transaction = transaction);
 
         IsTestingSpeed = true;
         IsTestCompleted = false; // Hidden until test completes
@@ -536,9 +607,12 @@ public partial class MainViewModel : ObservableObject
             ProgressPercentage = 100;
             UpdateSpeedQuality(finalSpeed);
             IsTestCompleted = true; // Show status pill and measurements now!
+            transaction.Finish(SpanStatus.Ok);
         }
         catch (Exception ex)
         {
+            transaction.Finish(SpanStatus.InternalError);
+            AppLogger.LogError("[SpeedTest Error]", ex);
             SpeedTestStatus = LocalizationService.Get("StatusActionError", ex.Message);
         }
         finally
@@ -586,6 +660,7 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     public void RestartAsAdmin()
     {
+        SentryService.TrackFeatureUsage("restart_as_admin");
         AdminHelper.RestartAsAdministrator();
     }
 
@@ -595,6 +670,7 @@ public partial class MainViewModel : ObservableObject
         if (obj == null) return;
         var text = obj.ToString();
         if (string.IsNullOrWhiteSpace(text)) return;
+        SentryService.TrackFeatureUsage("copy_to_clipboard");
         try
         {
             System.Windows.Clipboard.SetText(text);
@@ -611,6 +687,7 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     public void ClearRepairLog()
     {
+        SentryService.TrackFeatureUsage("repair_log_action", new() { ["action"] = "clear" });
         RepairLog = string.Empty;
         StatusMessage = LocalizationService.Get("StatusLogCleared");
     }
@@ -619,6 +696,7 @@ public partial class MainViewModel : ObservableObject
     public void CopyRepairLog()
     {
         if (string.IsNullOrWhiteSpace(RepairLog)) return;
+        SentryService.TrackFeatureUsage("repair_log_action", new() { ["action"] = "copy" });
         try
         {
             System.Windows.Clipboard.SetText(RepairLog);

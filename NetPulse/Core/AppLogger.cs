@@ -1,37 +1,81 @@
 using System.Diagnostics;
+using Sentry;
 
 namespace NetPulse.Core;
 
 /// <summary>
-/// Provides logging methods that are only active in DEBUG configuration.
-/// In RELEASE builds, the C# compiler completely strips out calls to these methods.
+/// Ilova loglarini konsolga chiqaradi, shuningdek barcha log va xatoliklarni
+/// Sentry tizimiga (Structured Logs, Breadcrumbs va Issues/Errors) uzatadi.
 /// </summary>
 public static class AppLogger
 {
-    [Conditional("DEBUG")]
     public static void Log(string message)
     {
+        Debug.WriteLine(message);
         Console.WriteLine(message);
+
+        try
+        {
+            // Sentry Breadcrumbs va Sentry Structured Logs
+            SentrySdk.AddBreadcrumb(message, category: "app", level: BreadcrumbLevel.Info);
+            SentrySdk.Logger.LogInfo(message);
+        }
+        catch
+        {
+            // Logging failure should never crash the app
+        }
     }
 
-    [Conditional("DEBUG")]
     public static void Log(string format, params object?[] args)
     {
-        Console.WriteLine(string.Format(format, args));
+        var message = string.Format(format, args);
+        Log(message);
     }
 
-    [Conditional("DEBUG")]
     public static void LogError(string message, Exception? ex = null)
     {
-        Console.ForegroundColor = ConsoleColor.Red;
-        if (ex != null)
+        Debug.WriteLine($"[ERROR] {message}: {ex}");
+
+        try
         {
-            Console.Error.WriteLine($"{message}: {ex}");
+            Console.ForegroundColor = ConsoleColor.Red;
+            if (ex != null)
+            {
+                Console.Error.WriteLine($"{message}: {ex}");
+            }
+            else
+            {
+                Console.Error.WriteLine(message);
+            }
+            Console.ResetColor();
         }
-        else
+        catch
         {
-            Console.Error.WriteLine(message);
+            // Ignore console color exceptions
         }
-        Console.ResetColor();
+
+        try
+        {
+            var fullMessage = ex != null ? $"{message}: {ex.Message}" : message;
+            SentrySdk.AddBreadcrumb(fullMessage, category: "error", level: BreadcrumbLevel.Error);
+            SentrySdk.Logger.LogError(fullMessage);
+
+            if (ex != null)
+            {
+                SentrySdk.CaptureException(ex, scope =>
+                {
+                    scope.SetTag("error_context", message);
+                    scope.SetTag("device_id", DeviceIdentifier.GetDeviceId());
+                });
+            }
+            else
+            {
+                SentrySdk.CaptureMessage(message, SentryLevel.Error);
+            }
+        }
+        catch
+        {
+            // Sentry error dispatching should never crash the app
+        }
     }
 }
