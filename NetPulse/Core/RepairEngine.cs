@@ -1,5 +1,6 @@
 using System.Text;
 using Microsoft.Win32;
+using NetPulse.Localization;
 using NetPulse.Models;
 
 namespace NetPulse.Core;
@@ -73,7 +74,7 @@ public static class RepairEngine
             RepairActionId.DnsGoogle => await SetDnsAsync(netInfo?.AdapterName ?? "Wi-Fi", "8.8.8.8", "8.8.4.4"),
             RepairActionId.ResetStack => await FixResetStackAsync(),
             RepairActionId.FlushDns => await FlushDnsAsync(),
-            _ => RepairActionResult.Fail("Noma'lum amal.")
+            _ => RepairActionResult.Fail(LocalizationService.Get("Repair_UnknownAction"))
         };
     }
 
@@ -86,11 +87,11 @@ netsh interface tcp set global rss=enabled
         var proc = await AdminHelper.RunElevatedScriptAsync(script);
         if (proc.Success)
         {
-            return RepairActionResult.Ok("TCP Window Auto-Tuning 'normal' holatga sozlandi! Tarmoq o'tkazuvchanligi to'liq ochildi.");
+            return RepairActionResult.Ok(LocalizationService.Get("Repair_TcpSuccess"));
         }
 
         var errorMsg = !string.IsNullOrWhiteSpace(proc.Error) ? proc.Error : proc.Output;
-        return RepairActionResult.Fail($"Xatolik: {errorMsg}. Administrator huquqi bilan qayta urinib ko'ring.");
+        return RepairActionResult.Fail(LocalizationService.Get("Repair_TcpError", errorMsg));
     }
 
     public static async Task<RepairActionResult> FixNetworkThrottlingAsync()
@@ -105,11 +106,11 @@ Set-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multi
 
             if (proc.Success)
             {
-                return RepairActionResult.Ok("Network Throttling muvaffaqiyatli o'chirildi (0xFFFFFFFF). Tarmoq paketlari to'siqsiz harakatlanadi.");
+                return RepairActionResult.Ok(LocalizationService.Get("Repair_ThrottleSuccess"));
             }
 
             var errorMsg = !string.IsNullOrWhiteSpace(proc.Error) ? proc.Error : proc.Output;
-            return RepairActionResult.Fail($"Registry o'zgartirilmadi: {errorMsg}. Administrator huquqi zarur.");
+            return RepairActionResult.Fail(LocalizationService.Get("Repair_ThrottleError", errorMsg));
         }
         catch (Exception ex)
         {
@@ -130,11 +131,11 @@ powercfg /SetActive SCHEME_CURRENT
 
             if (proc.Success)
             {
-                return RepairActionResult.Ok("Wi-Fi quvvat tejash rejimi 'Maksimal Unumdorlik' (Maximum Performance) ga o'tkazildi!");
+                return RepairActionResult.Ok(LocalizationService.Get("Repair_PowerSuccess"));
             }
 
             var errorMsg = !string.IsNullOrWhiteSpace(proc.Error) ? proc.Error : proc.Output;
-            return RepairActionResult.Fail($"Quvvat rejimini o'zgartirib bo'lmadi: {errorMsg}.");
+            return RepairActionResult.Fail(LocalizationService.Get("Repair_PowerError", errorMsg));
         }
         catch (Exception ex)
         {
@@ -154,11 +155,11 @@ Clear-DnsClientCache
 
             if (proc.Success)
             {
-                return RepairActionResult.Ok($"{adapterName} uchun DNS serverlar {primaryDns}, {secondaryDns} ga o'zgartirildi va DNS keshi tozalandi.");
+                return RepairActionResult.Ok(LocalizationService.Get("Repair_DnsSuccess", adapterName, primaryDns, secondaryDns));
             }
 
             var errorMsg = !string.IsNullOrWhiteSpace(proc.Error) ? proc.Error : proc.Output;
-            return RepairActionResult.Fail($"DNS o'zgartirilmadi: {errorMsg}. Administrator huquqi talab qilinadi.");
+            return RepairActionResult.Fail(LocalizationService.Get("Repair_DnsError", errorMsg));
         }
         catch (Exception ex)
         {
@@ -179,11 +180,11 @@ ipconfig /flushdns
 
             if (proc.Success)
             {
-                return RepairActionResult.Ok("Winsock va TCP/IP stack to'liq qayta sozlandi. O'zgarishlar kuchga kirishi uchun kompyuterni qayta ishga tushirish (Restart) tavsiya etiladi.", requiresRestart: true);
+                return RepairActionResult.Ok(LocalizationService.Get("Repair_ResetStackSuccess"), requiresRestart: true);
             }
 
             var errorMsg = !string.IsNullOrWhiteSpace(proc.Error) ? proc.Error : proc.Output;
-            return RepairActionResult.Fail($"Stack qayta sozlanmadi: {errorMsg}.");
+            return RepairActionResult.Fail(LocalizationService.Get("Repair_ResetStackError", errorMsg));
         }
         catch (Exception ex)
         {
@@ -195,8 +196,8 @@ ipconfig /flushdns
     {
         var proc = await AdminHelper.RunCommandAsync("ipconfig.exe", "/flushdns");
         return proc.Success 
-            ? RepairActionResult.Ok("DNS keshi muvaffaqiyatli tozalandi.") 
-            : RepairActionResult.Fail("DNS keshini tozalashda xatolik yuz berdi.");
+            ? RepairActionResult.Ok(LocalizationService.Get("Repair_FlushDnsSuccess")) 
+            : RepairActionResult.Fail(LocalizationService.Get("Repair_FlushDnsError"));
     }
 
     public static async Task<RepairActionResult> OptimizeAllAsync(NetworkInfo? netInfo)
@@ -248,18 +249,18 @@ Write-Output ($log -join ';')
 
         if (!proc.Success && string.IsNullOrWhiteSpace(proc.Output))
         {
-            return RepairActionResult.Fail("Administrator huquqi zarur.");
+            return RepairActionResult.Fail(LocalizationService.Get("Repair_AdminRequired"));
         }
 
         var results = proc.Output.Trim().Split(';', StringSplitOptions.RemoveEmptyEntries);
-        var tcpOk = results.Contains("TCP:OK");
-        var throttleOk = results.Contains("THROTTLE:OK");
-        var powerOk = results.Contains("POWER:OK");
+        var tcpOk = results.Any(r => r.Trim() == "TCP:OK");
+        var throttleOk = results.Any(r => r.Trim() == "THROTTLE:OK");
+        var powerOk = results.Any(r => r.Trim() == "POWER:OK");
 
         var allSuccess = tcpOk && throttleOk && powerOk;
 
         return allSuccess
-            ? RepairActionResult.Ok("Barcha asosiy parametrlar muvaffaqiyatli optimallashtirildi!")
-            : RepairActionResult.Ok("Optimizatsiya yakunlandi (ba'zi parametrlar uchun ruxsat kerak).");
+            ? RepairActionResult.Ok(LocalizationService.Get("Repair_OptimizeAllSuccess"))
+            : RepairActionResult.Ok(LocalizationService.Get("Repair_OptimizeAllPartial"));
     }
 }

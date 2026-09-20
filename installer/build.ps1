@@ -1,6 +1,6 @@
 # NetPulse Local Build Script for Setup & Update package
 param (
-    [string]$Version = "1.0.0",
+    [string]$Version = "",
     [string]$Configuration = "Release"
 )
 
@@ -9,6 +9,18 @@ $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RootDir = Split-Path -Parent $ScriptDir
 $PublishDir = Join-Path $RootDir "publish"
 $OutputDir = Join-Path $ScriptDir "output"
+
+# Auto-detect version from NetPulse.csproj if not passed
+if ([string]::IsNullOrWhiteSpace($Version)) {
+    $CsprojPath = Join-Path $RootDir "NetPulse\NetPulse.csproj"
+    if (Test-Path $CsprojPath) {
+        [xml]$proj = Get-Content $CsprojPath
+        $Version = $proj.Project.PropertyGroup.Version
+    }
+    if ([string]::IsNullOrWhiteSpace($Version)) {
+        $Version = "1.0.0"
+    }
+}
 
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host " Building NetPulse v$Version ($Configuration)" -ForegroundColor Cyan
@@ -82,13 +94,23 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 
-$SetupExe = Join-Path $OutputDir "NetPulse-Setup.exe"
-if (Test-Path $SetupExe) {
+$VersionedExe = Join-Path $OutputDir "NetPulse-Setup-v$Version.exe"
+$GenericExe = Join-Path $OutputDir "NetPulse-Setup.exe"
+
+$FoundExe = $null
+if (Test-Path $VersionedExe) {
+    $FoundExe = $VersionedExe
+    Copy-Item $VersionedExe $GenericExe -Force
+} elseif (Test-Path $GenericExe) {
+    $FoundExe = $GenericExe
+}
+
+if ($FoundExe) {
     Write-Host "`n========================================" -ForegroundColor Green
     Write-Host " SUCCESS! Installer ready at:" -ForegroundColor Green
-    Write-Host " $SetupExe" -ForegroundColor White
+    Write-Host " $FoundExe" -ForegroundColor White
     Write-Host "========================================" -ForegroundColor Green
 } else {
-    Write-Error "NetPulse-Setup.exe not found!"
+    Write-Error "Installer was not found in $OutputDir!"
     exit 1
 }

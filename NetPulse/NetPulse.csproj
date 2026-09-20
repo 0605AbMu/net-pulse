@@ -7,11 +7,20 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
     <Version>1.0.0</Version>
+    <AssemblyVersion>1.0.0.0</AssemblyVersion>
+    <FileVersion>1.0.0.0</FileVersion>
     <AssemblyTitle>NetPulse</AssemblyTitle>
     <Product>NetPulse</Product>
-    <Company>0605AbMu</Company>
+    <Authors>NetPulse</Authors>
+    <Company>NetPulse</Company>
     <Description>NetPulse Network Diagnostic &amp; Optimization Tool</Description>
+    <Copyright>Copyright © 2026 NetPulse</Copyright>
+    <ApplicationIcon>Assets\app.ico</ApplicationIcon>
   </PropertyGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\app.ico" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />

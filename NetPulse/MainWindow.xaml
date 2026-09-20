@@ -9,6 +9,7 @@
         xmlns:models="clr-namespace:NetPulse.Models"
         mc:Ignorable="d"
         Title="NetPulse — Windows Tarmoq Diagnostikasi va Optimizatori" 
+        Icon="Assets/app.ico"
         Height="800" Width="1180"
         MinHeight="680" MinWidth="1020"
         WindowStartupLocation="CenterScreen"

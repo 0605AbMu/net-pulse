@@ -1,25 +1,30 @@
-## Build results
-[Bb]in/
-[Oo]bj/
-[Ll]og/
-[Ll]ogs/
-publish/
+## .NET Core & WPF
+bin/
+obj/
 dist/
-installer/output/
-installer/dist/
-Output/
+publish/
 
-## Visual Studio / Rider / IDE cache
+## Visual Studio
 .vs/
-.idea/
 *.user
 *.userosscache
 *.sln.docstates
 *.suo
+
+## JetBrains Rider / IntelliJ
+.idea/
+*.sln.iml
+
+## Logs and Temp files
+*.log
+*.tmp
+*.ps1.tmp
+netpulse_*.ps1
+netpulse_*.log
+test_netpulse_*
 
 ## OS generated files
 Thumbs.db
 ehthumbs.db
 Desktop.ini
 $RECYCLE.BIN/
-.DS_Store

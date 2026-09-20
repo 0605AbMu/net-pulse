@@ -29,6 +29,14 @@
 #define OutputDir "output"
 #endif
 
+#ifndef OutputBaseFilename
+#define OutputBaseFilename "NetPulse-Setup-v" + MyAppVersion
+#endif
+
+#ifndef SetupIcon
+#define SetupIcon "..\NetPulse\Assets\app.ico"
+#endif
+
 [Setup]
 ; AppId identifies this application. Do not change this across updates!
 AppId={{8B8A0423-B245-4DC3-8DA3-E6E45E20F751}
@@ -53,7 +61,8 @@ PrivilegesRequiredOverridesAllowed=commandline
 
 ; Output settings
 OutputDir={#OutputDir}
-OutputBaseFilename=NetPulse-Setup
+OutputBaseFilename={#OutputBaseFilename}
+SetupIconFile={#SetupIcon}
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
