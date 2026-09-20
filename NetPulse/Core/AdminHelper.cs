@@ -24,11 +24,10 @@ public static class AdminHelper
             return path;
         }
 
-        var assemblyLocation = typeof(AdminHelper).Assembly.Location;
-        var exePath = Path.ChangeExtension(assemblyLocation, ".exe");
-        if (File.Exists(exePath))
+        var baseDirExe = Path.Combine(AppContext.BaseDirectory, "NetPulse.exe");
+        if (File.Exists(baseDirExe))
         {
-            return exePath;
+            return baseDirExe;
         }
 
         return path ?? string.Empty;

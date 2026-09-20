@@ -13,7 +13,19 @@ public partial class App : Application
 {
     protected override void OnStartup(StartupEventArgs e)
     {
-        
+        // 1. Check if NetPulse was invoked as elevated script runner: --run-script <scriptPath> <logPath>
+        for (int i = 0; i < e.Args.Length; i++)
+        {
+            if (e.Args[i] == "--run-script" && i + 2 < e.Args.Length)
+            {
+                var scriptPath = e.Args[i + 1];
+                var logPath = e.Args[i + 2];
+                var exitCode = ExecuteScriptElevated(scriptPath, logPath);
+                Shutdown(exitCode);
+                return;
+            }
+        }
+
 #if !DEBUG
         // 2. Normal startup: if not admin and not explicitly told not to elevate, restart NetPulse as Administrator
         // The Windows UAC prompt will display "NetPulse" (the app itself!)
@@ -27,7 +39,6 @@ public partial class App : Application
                 return;
             }
         }
-
 #endif
 
         SetupExceptionHandling();
@@ -58,5 +69,33 @@ public partial class App : Application
             AppLogger.LogError("\n[TaskScheduler UNOBSERVED EXCEPTION]", args.Exception);
             Trace.TraceError($"[TaskScheduler UNOBSERVED EXCEPTION]: {args.Exception}");
         };
+    }
+
+    private static int ExecuteScriptElevated(string scriptPath, string logPath)
+    {
+        try
+        {
+            if (!File.Exists(scriptPath))
+            {
+                File.WriteAllText(logPath, "Skript fayli topilmadi: " + scriptPath, System.Text.Encoding.UTF8);
+                return 1;
+            }
+
+            var script = File.ReadAllText(scriptPath, System.Text.Encoding.UTF8);
+            var result = AdminHelper.RunScriptInProcess(script);
+
+            var output = !string.IsNullOrEmpty(result.Output) ? result.Output : result.Error;
+            File.WriteAllText(logPath, output ?? string.Empty, System.Text.Encoding.UTF8);
+            return result.ExitCode;
+        }
+        catch (Exception ex)
+        {
+            try
+            {
+                File.WriteAllText(logPath, "Runner Exception: " + ex.Message, System.Text.Encoding.UTF8);
+            }
+            catch { }
+            return 1;
+        }
     }
 }

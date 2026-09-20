@@ -3,6 +3,11 @@
 [Oo]bj/
 [Ll]og/
 [Ll]ogs/
+publish/
+dist/
+installer/output/
+installer/dist/
+Output/
 
 ## Visual Studio / Rider / IDE cache
 .vs/
