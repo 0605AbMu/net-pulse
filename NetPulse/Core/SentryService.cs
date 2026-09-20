@@ -56,10 +56,65 @@ public static class SentryService
             });
 
             _isInitialized = true;
+
+            // 1. Dastur ishga tushganda device_id bo'yicha unikal mijoz metrikasini jo'natish
+            TrackClientActive("app_launch");
+
+            // 2. Dastur ochiq turganda har 1 soatda mijoz faolligini qayd etib boruvchi taymer
+            _heartbeatTimer = new Timer(_ =>
+            {
+                TrackClientActive("heartbeat");
+            }, null, TimeSpan.FromHours(1), TimeSpan.FromHours(1));
         }
         catch (Exception ex)
         {
             Trace.TraceWarning($"[Sentry] Initializatsiyada xatolik: {ex.Message}");
+        }
+    }
+
+    private static Timer? _heartbeatTimer;
+
+    /// <summary>
+    /// Qurilmaning device_id si bo'yicha unikal mijozlar soni va faolligini Sentry metrikalariga yuboradi.
+    /// Sentry Metrics konsolida "client.active" yoki "client.count" bo'yicha
+    /// count_unique(device_id) funksiyasi orqali jami unikal mijozlar soni ko'rinadi.
+    /// </summary>
+    public static void TrackClientActive(string source = "app_launch")
+    {
+        try
+        {
+            var deviceId = DeviceId;
+            var appVersion = AppVersionHelper.Version;
+
+            var tags = new List<KeyValuePair<string, object>>
+            {
+                new("device_id", deviceId),
+                new("source", source),
+                new("version", appVersion),
+                new("machine_name", Environment.MachineName),
+                new("os", Environment.OSVersion.VersionString),
+                new("is_admin", AdminHelper.IsAdministrator().ToString())
+            };
+
+            // 1. Asosiy mijoz faolligi hisoblagichi (Sentry da count_unique(device_id) orqali unikal clientlar sanaladi)
+            SentrySdk.Metrics.EmitCounter("client.active", 1, tags);
+
+            // 2. Har bir unikal qurilma uchun "client.device" hisoblagichi
+            SentrySdk.Metrics.EmitCounter("client.device", 1, new List<KeyValuePair<string, object>>
+            {
+                new("device_id", deviceId),
+                new("version", appVersion)
+            });
+
+            // 3. Jami mijozlar hisoblagichi (oddiy va tezkor agregatsiya uchun)
+            SentrySdk.Metrics.EmitCounter("client.count", 1, new List<KeyValuePair<string, object>>
+            {
+                new("device_id", deviceId)
+            });
+        }
+        catch (Exception ex)
+        {
+            Trace.TraceWarning($"[Sentry] Client metrikasini yuborishda xatolik: {ex.Message}");
         }
     }
 
@@ -102,6 +157,10 @@ public static class SentryService
     {
         try
         {
+            _heartbeatTimer?.Dispose();
+            _heartbeatTimer = null;
+
+            SentrySdk.Flush(TimeSpan.FromSeconds(2));
             _sentryClient?.Dispose();
             _sentryClient = null;
             _isInitialized = false;
